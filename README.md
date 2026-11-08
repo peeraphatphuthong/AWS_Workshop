@@ -4,7 +4,7 @@ A hands-on, production-style project for learning **AWS** and **Terraform** end 
 infrastructure as code, GitOps-style CI/CD with GitHub Actions, a containerized web app,
 a managed database, monitoring, and cost control (FinOps).
 
-> Status: **Phase 6 — CI/CD done**: PR plan comments, approval-gated `terraform apply`, auto deploy with rollback (`terraform -chdir=infra output web_url`) (see [docs/ROADMAP.md](docs/ROADMAP.md))
+> Status: **Phase 7 — Observability & FinOps**: CloudWatch alarms → SNS email, container/RDS logs, dashboard, synthetic health check, office-hours stop/start, weekly FinOps audit (`terraform -chdir=infra output dashboard_url`) (see [docs/ROADMAP.md](docs/ROADMAP.md))
 
 ## Target architecture
 

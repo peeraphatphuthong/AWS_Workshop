@@ -36,3 +36,6 @@ npm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# Lambda zips built by terraform plan (archive_file)
+.build/

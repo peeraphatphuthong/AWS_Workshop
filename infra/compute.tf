@@ -49,6 +49,13 @@ resource "aws_instance" "web" {
     http_put_response_hop_limit = 2
   }
 
+  # FinOps: Terraform/AWS launch T3 instances in "unlimited" credit mode by default. A busy loop
+  # then keeps burning surplus credits at $0.05/vCPU-hour — silently. "standard" throttles to the
+  # baseline (10% for t3.micro) instead; the CPUCreditBalance alarm tells us if that ever happens.
+  credit_specification {
+    cpu_credits = "standard"
+  }
+
   root_block_device {
     volume_type           = "gp3"
     volume_size           = 8
@@ -69,6 +76,7 @@ resource "aws_instance" "web" {
     compose_sha256         = "47737f4236e6d3ccea7291995203f8f018058783b4c3a9469119811a0b5db8c0"
     docker_compose_content = file("${path.module}/../app/docker-compose.yml")
     nginx_conf_content     = file("${path.module}/../app/nginx/nginx.conf")
+    container_log_group    = aws_cloudwatch_log_group.containers.name
   })
   # Treat the host as immutable: a bootstrap change builds a fresh instance instead of
   # silently doing nothing (user_data only runs on first boot).
@@ -92,6 +100,7 @@ resource "aws_instance" "web" {
     aws_iam_role_policy_attachment.web_ecr,
     aws_iam_role_policy.web_params,
     aws_iam_role_policy.web_db_secrets,
+    aws_iam_role_policy.web_logs,             # Docker's awslogs driver must be allowed to write before containers start
     aws_secretsmanager_secret_version.db_app, # secret must have a value before first boot
   ]
 }

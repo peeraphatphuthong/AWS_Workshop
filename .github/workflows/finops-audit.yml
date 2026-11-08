@@ -1,0 +1,38 @@
+name: finops-audit
+
+# Weekly cost hygiene report (orphaned EBS/EIPs, snapshots, log retention, credit mode, MTD cost).
+# Read-only plan user. The report is in the run's job summary.
+on:
+  schedule:
+    - cron: "0 1 * * 1" # Monday 01:00 UTC = 08:00 Bangkok
+  workflow_dispatch:
+    inputs:
+      strict:
+        description: "Fail the run when anything is found"
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - "scripts/finops-audit.sh"
+      - ".github/workflows/finops-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    environment: aws-plan # ReadOnlyAccess
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Run audit
+        env:
+          STRICT: ${{ inputs.strict && '1' || '0' }}
+        run: bash scripts/finops-audit.sh

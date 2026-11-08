@@ -77,7 +77,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tfplan-infra-${{ github.sha }}
-          path: infra/tfplan
+          # .build = Lambda zips created by archive_file during plan; apply needs the same files.
+          path: |
+            infra/tfplan
+            infra/.build/
+          include-hidden-files: true
           retention-days: 1
 
   apply:

@@ -22,7 +22,7 @@ resource "aws_db_parameter_group" "mysql" {
     value = "1"
   }
 
-  # Log queries slower than 1s (shipped to CloudWatch Logs in Phase 7).
+  # Log queries slower than 1s (exported to CloudWatch Logs, see logs.tf).
   parameter {
     name  = "slow_query_log"
     value = "1"
@@ -39,7 +39,7 @@ resource "aws_db_parameter_group" "mysql" {
 }
 
 resource "aws_db_instance" "mysql" {
-  identifier     = "${local.name_prefix}-mysql"
+  identifier     = local.db_identifier
   engine         = "mysql"
   engine_version = "8.4" # major only -> RDS picks the default minor; auto_minor_version_upgrade keeps it patched
 
@@ -71,6 +71,11 @@ resource "aws_db_instance" "mysql" {
   deletion_protection = false
   skip_final_snapshot = true
   apply_immediately   = true
+
+  # Ship MySQL error + slow query logs to CloudWatch Logs (Phase 7). The log groups are created
+  # first (logs.tf) so they get a retention period instead of "Never expire".
+  enabled_cloudwatch_logs_exports = local.rds_log_exports
+  depends_on                      = [aws_cloudwatch_log_group.rds]
 
   tags = { Name = "${local.name_prefix}-mysql" }
 }
