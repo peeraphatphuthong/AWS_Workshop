@@ -108,17 +108,20 @@ rows=$(aws logs describe-log-groups \
 section "Log groups without retention" "$rows" "Log group${TAB}Stored bytes" \
   'Storage is about $0.03/GB-month forever. Set retention_in_days in Terraform.'
 
-# 9. Burstable (T) instances in "unlimited" CPU credit mode (surplus credits are billed).
-ids=$(aws ec2 describe-instances --filters Name=instance-state-name,Values=running,stopped \
-  --query 'Reservations[].Instances[?starts_with(InstanceType,`t`)].InstanceId' --output text)
-rows=""
+# 9. Burstable (T) instances: credit mode. Informational only: "unlimited" is a deliberate choice here
+#    (T3 has no launch credits, "standard" throttled the first boot to 10% CPU). Watch surplus instead.
+ids=$(aws ec2 describe-instances --filters Name=instance-state-name,Values=running,stopped   --query 'Reservations[].Instances[?starts_with(InstanceType,`t`)].InstanceId' --output text)
 if [ -n "$ids" ]; then
   # shellcheck disable=SC2086 # word splitting is intended: one argument per instance ID
-  rows=$(aws ec2 describe-instance-credit-specifications --instance-ids $ids \
-    --query 'InstanceCreditSpecifications[?CpuCredits==`unlimited`].[InstanceId,CpuCredits]' --output text)
+  rows=$(aws ec2 describe-instance-credit-specifications --instance-ids $ids     --query 'InstanceCreditSpecifications[].[InstanceId,CpuCredits]' --output text)
+  say "### ℹ️ Burstable instance credit modes"
+  say '_unlimited: surplus CPU is billed at $0.05/vCPU-hour if not earned back (alarm: ec2-cpu-surplus-high)._'
+  say ""
+  say "| Instance | Mode |"
+  say "|---|---|"
+  table "$rows"
+  say ""
 fi
-section "Burstable instances in unlimited credit mode" "$rows" "Instance${TAB}Mode" \
-  'Sustained high CPU is billed at $0.05/vCPU-hour extra. Prefer standard unless you need bursts.'
 
 # 10. ECR images without tags (should be expired by a lifecycle policy).
 rows=""

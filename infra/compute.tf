@@ -49,11 +49,15 @@ resource "aws_instance" "web" {
     http_put_response_hop_limit = 2
   }
 
-  # FinOps: Terraform/AWS launch T3 instances in "unlimited" credit mode by default. A busy loop
-  # then keeps burning surplus credits at $0.05/vCPU-hour — silently. "standard" throttles to the
-  # baseline (10% for t3.micro) instead; the CPUCreditBalance alarm tells us if that ever happens.
+  # T3 credit mode — a FinOps trade-off we got wrong first (Phase 7):
+  #   "standard" looked cheaper, but T3 (unlike T2) gets NO launch credits. A new instance starts at
+  #   0 credits and is throttled to the 10% baseline, so the first boot (dnf + docker pull/extract)
+  #   took 10+ minutes instead of ~3, on every replacement.
+  #   "unlimited" bursts as needed; surplus is billed at $0.05/vCPU-hour only if it isn't earned back.
+  #   A boot burst costs cents. The real risk — sustained high CPU — is caught by the
+  #   ec2-cpu-surplus-high alarm (CPUSurplusCreditBalance) instead of being silently throttled.
   credit_specification {
-    cpu_credits = "standard"
+    cpu_credits = "unlimited"
   }
 
   root_block_device {

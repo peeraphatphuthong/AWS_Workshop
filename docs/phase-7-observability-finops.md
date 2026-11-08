@@ -34,7 +34,7 @@ Dashboard aws-workshop-dev: one page for incidents.  Weekly GitHub Action: FinOp
 | `nginx-5xx` | Users get errors even though the site is "up" |
 | `rds-connections-high` (> 40, max ≈ 60) | **Cloud SQL connection-pool incident, AWS edition**: alert while there is still headroom |
 | `rds-cpu-high`, `rds-freeable-memory-low`, `rds-free-storage-low` | Database saturation; storage autoscaling is off |
-| `ec2-cpu-high`, `ec2-cpu-credits-low` | Host saturation; with `standard` credits, 0 credits = throttled to 10% |
+| `ec2-cpu-high`, `ec2-cpu-surplus-high` | Host saturation; surplus credits in `unlimited` mode end up on the bill |
 | `ec2-system-check-failed` | AWS hardware problem → **auto-recover** to new hardware (same ID, IP, EIP, EBS) + email |
 | `healthcheck-lambda-errors` | Watch the watcher: a broken checker otherwise looks like "all green" |
 
@@ -95,13 +95,21 @@ Side effects while asleep: the app deploy job fails (no running instance; re-run
 modified while stopped, and AWS auto-starts a stopped RDS after 7 days (the daily stop catches it).
 Storage (EBS, RDS storage) and the EIP still cost money when stopped.
 
-**Hidden cost found: T3 "unlimited" credit mode.** AWS launches T3 instances in `unlimited` mode by default:
-if CPU stays above the baseline (10% for t3.micro) you pay $0.05 per vCPU-hour of surplus, silently. Set to
-`standard` (`credit_specification`), plus the `ec2-cpu-credits-low` alarm. The audit script found it.
+**T3 credit mode: a FinOps change that broke the boot (and was rolled back).**
+AWS launches T3 instances in `unlimited` mode: CPU above the baseline (10% for t3.micro) that isn't earned back
+is billed at $0.05/vCPU-hour. The first version of this phase switched to `standard` to rule that out. Result
+after apply: the new instance sat at **exactly 10% CPU with a credit balance of 0** and the first boot (dnf,
+docker pull/extract) took 10+ minutes instead of ~3. Reason: **T3 gets no launch credits** (T2 did), so a fresh
+`standard` instance starts throttled. Every replacement would be slow, and so would every morning start.
+
+Fix (follow-up PR): back to `unlimited`, and instead of preventing bursts, *watch* them: the
+`ec2-cpu-surplus-high` alarm (`CPUSurplusCreditBalance` > 60) fires on sustained load. A boot burst costs cents.
+Lesson: a cost optimisation is a change like any other. Check what it does to performance, and look at the
+metrics (`CPUCreditBalance`, `CPUUtilization` flat at the baseline) right after rolling it out.
 
 **`scripts/finops-audit.sh`** (weekly in Actions with the read-only user, or locally): unattached EBS, unassociated
 EIPs, public IPv4 count, stopped instances, old snapshots, manual RDS snapshots, log groups without retention,
-unlimited-credit instances, untagged ECR images, month-to-date cost per service. `STRICT=1` makes it fail on findings.
+credit mode of T instances, untagged ECR images, month-to-date cost per service. `STRICT=1` makes it fail on findings.
 
 Cost of Phase 7 itself: ~$0.30/month (one custom metric from the metric filter + health check metrics) +
 log ingestion (cents). Alarms, dashboard, Lambda, Scheduler, SNS email are within the free tier.
@@ -109,6 +117,7 @@ log ingestion (cents). Alarms, dashboard, Lambda, Scheduler, SNS email are withi
 ## Issues hit
 - `[ -n "$line" ] && say ...` as the last command of a function under `set -e` made the audit script exit
   silently with code 1 (same trap as Phase 6). Use `if … then … fi`.
+- T3 `standard` credit mode: no launch credits, so the new instance was throttled to 10% CPU during boot (see FinOps).
 - `jq` isn't installed in Git Bash on Windows → the script uses only `--query` (JMESPath) + `awk`.
 
 ## Interview Q&A
