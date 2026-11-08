@@ -11,6 +11,9 @@ data "aws_availability_zones" "available" {
 locals {
   name_prefix = "${var.project}-${var.environment}"
 
+  # Parameter Store / Secrets Manager path for app settings of this environment.
+  param_prefix = "/retail-health/${var.environment}"
+
   # Take the first N AZs instead of hard-coding "ap-southeast-2a" etc.
   azs = slice(sort(data.aws_availability_zones.available.names), 0, var.az_count)
 

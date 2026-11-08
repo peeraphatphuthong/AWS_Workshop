@@ -4,7 +4,7 @@ A hands-on, production-style project for learning **AWS** and **Terraform** end 
 infrastructure as code, GitOps-style CI/CD with GitHub Actions, a containerized web app,
 a managed database, monitoring, and cost control (FinOps).
 
-> Status: **Phase 3 — App + ECR done** (see [docs/ROADMAP.md](docs/ROADMAP.md))
+> Status: **Phase 4 — Compute done, app live on EC2** (`terraform -chdir=infra output web_url`) (see [docs/ROADMAP.md](docs/ROADMAP.md))
 
 ## Target architecture
 

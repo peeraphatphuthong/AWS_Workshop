@@ -30,6 +30,40 @@ output "db_security_group_id" {
   value = aws_security_group.db.id
 }
 
+output "web_url" {
+  description = "Open this in a browser."
+  value       = "http://${aws_eip.web.public_ip}"
+}
+
+output "web_public_eip" {
+  value = aws_eip.web.public_ip
+}
+
+output "web_private_ip" {
+  value = aws_instance.web.private_ip
+}
+
+output "web_instance_id" {
+  value = aws_instance.web.id
+}
+
+output "web_availability_zone" {
+  value = aws_instance.web.availability_zone
+}
+
+output "ebs_volume_id" {
+  value = aws_ebs_volume.app_data.id
+}
+
+output "ssm_shell_command" {
+  description = "Open a shell on the instance without SSH (needs the Session Manager plugin)."
+  value       = "aws ssm start-session --target ${aws_instance.web.id}"
+}
+
+output "image_tag_parameter" {
+  value = aws_ssm_parameter.image_tag.name
+}
+
 output "ecr_repository_url" {
   description = "Push/pull URL of the app image repository."
   value       = aws_ecr_repository.app.repository_url

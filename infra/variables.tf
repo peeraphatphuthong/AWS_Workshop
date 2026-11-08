@@ -43,6 +43,29 @@ variable "az_count" {
   }
 }
 
+variable "web_instance_type" {
+  description = "EC2 instance type for the web host."
+  type        = string
+  default     = "t3.micro"
+}
+
+variable "data_volume_size_gb" {
+  description = "Size of the EBS data volume mounted at /mnt/app-data."
+  type        = number
+  default     = 10
+}
+
+variable "initial_image_tag" {
+  description = "Image tag (git SHA) written to Parameter Store on first apply. CI/CD updates it afterwards."
+  type        = string
+  default     = "16c2953b8d1ae718fdb4714b421de3b45e2d98d5"
+
+  validation {
+    condition     = can(regex("^[0-9a-f]{40}$", var.initial_image_tag))
+    error_message = "initial_image_tag must be a full 40-character git SHA."
+  }
+}
+
 variable "web_ingress" {
   description = "Inbound rules for the web tier security group."
   type = list(object({
