@@ -2,15 +2,17 @@
 
 ## What was done
 1. Installed tooling on Windows with `winget`: Git, AWS CLI v2, Terraform, GitHub CLI.
-2. Set the default region: `aws configure set region ap-southeast-1`.
+2. Set the default region: `aws configure set region ap-southeast-2`.
+   The AWS account is a sandbox project ("Ready Set Build") that only allows **ap-southeast-2 (Sydney)** —
+   a real-world example of an org guardrail (SCP / region restriction). All Terraform code uses this region.
 3. Authenticated:
-   - AWS: `aws login` (browser sign-in with console credentials → short-lived credentials cached locally; no access keys created).
+   - AWS: `aws login --region ap-southeast-2` (browser sign-in with console credentials → short-lived credentials cached locally; no access keys created).
    - GitHub: `gh auth login --web`.
 4. Created the repo skeleton (`README.md`, `.gitignore`, `.gitattributes`, `docs/`) and pushed the first commit.
 
 ## Concepts
-- **Region vs AZ**: a region (`ap-southeast-1`, Singapore) is a geographic area made of several isolated
-  Availability Zones (`ap-southeast-1a/b/c`). Some resources are regional (VPC, S3 bucket, RDS subnet group),
+- **Region vs AZ**: a region (`ap-southeast-2`, Sydney) is a geographic area made of several isolated
+  Availability Zones (`ap-southeast-2a/b/c`). Some resources are regional (VPC, S3 bucket, RDS subnet group),
   some are zonal (subnet, EC2 instance, EBS volume) — this matters a lot in Phase 4.
 - **Short-lived vs long-lived credentials**: `aws login` / IAM Identity Center / OIDC hand out temporary
   credentials that expire. Static access keys (`AKIA...`) never expire unless rotated, so they are the #1 cause of

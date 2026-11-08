@@ -12,7 +12,7 @@ a managed database, monitoring, and cost control (FinOps).
 GitHub (PR → CI → merge → CD)
    │  OIDC federation (no long-lived AWS keys in GitHub)
    ▼
-AWS (ap-southeast-1)
+AWS (ap-southeast-2, Sydney)
  ├─ S3              Terraform remote state (+ native lockfile)
  ├─ ECR             Docker images of the app
  └─ VPC (2 AZs)
