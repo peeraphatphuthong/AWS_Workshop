@@ -1,0 +1,119 @@
+#!/bin/bash
+# EC2 bootstrap (runs once, as root, on first boot). Rendered by Terraform templatefile():
+#   a doubled dollar sign before a brace is escaped for bash; a single one is filled in by Terraform.
+# Log: /var/log/user-data.log  (also visible with `aws ec2 get-console-output`)
+set -euxo pipefail
+exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
+
+APP_DIR=/opt/retail-health
+DATA_DIR=/mnt/app-data
+
+# ---------------------------------------------------------------- 1. Docker + Compose plugin
+dnf install -y docker
+systemctl enable --now docker
+
+PLUGIN_DIR=/usr/local/lib/docker/cli-plugins
+mkdir -p "$PLUGIN_DIR"
+curl -fsSL -o "$PLUGIN_DIR/docker-compose" \
+  "https://github.com/docker/compose/releases/download/${compose_version}/docker-compose-linux-x86_64"
+# Verify the download against the published checksum before executing it.
+echo "${compose_sha256}  $PLUGIN_DIR/docker-compose" | sha256sum -c -
+chmod +x "$PLUGIN_DIR/docker-compose"
+docker compose version
+
+# ---------------------------------------------------------------- 2. EBS data volume
+# On Nitro instances "/dev/sdf" appears as /dev/nvmeXn1 and the number isn't guaranteed.
+# udev creates a stable link containing the volume ID — use that to find the right disk.
+VOL_ID="${data_volume_id}"
+DEV_LINK="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_$${VOL_ID//-/}"
+
+# The attachment is created by Terraform AFTER the instance exists, so wait for it.
+for i in $(seq 1 60); do
+  [ -e "$DEV_LINK" ] && break
+  echo "waiting for $VOL_ID to attach ($i/60)"; sleep 5
+done
+[ -e "$DEV_LINK" ] || { echo "EBS volume $VOL_ID never attached"; exit 1; }
+DEV=$(readlink -f "$DEV_LINK")
+
+# Format ONLY if the disk has no filesystem yet — a re-attached volume keeps its data.
+if ! blkid "$DEV"; then
+  mkfs -t xfs -L appdata "$DEV"
+fi
+
+mkdir -p "$DATA_DIR"
+UUID=$(blkid -s UUID -o value "$DEV")
+# fstab by UUID (device names can change between boots); nofail = still boot if it's missing.
+grep -q "$UUID" /etc/fstab || echo "UUID=$UUID $DATA_DIR xfs defaults,nofail 0 2" >> /etc/fstab
+mount -a
+chown 1000:1000 "$DATA_DIR"   # uid of the "node" user inside the app container
+df -h "$DATA_DIR"
+
+# ---------------------------------------------------------------- 3. App files
+mkdir -p "$APP_DIR/nginx"
+cat > "$APP_DIR/docker-compose.yml" <<'COMPOSE_EOF'
+${docker_compose_content}
+COMPOSE_EOF
+
+cat > "$APP_DIR/nginx/nginx.conf" <<'NGINX_EOF'
+${nginx_conf_content}
+NGINX_EOF
+
+# ---------------------------------------------------------------- 4. Deploy script
+# Same script is used for every later release (CI calls it through SSM Run Command):
+# read desired tag from Parameter Store -> pull from ECR -> restart -> health check.
+cat > /usr/local/bin/deploy-app <<'DEPLOY_EOF'
+#!/bin/bash
+set -euo pipefail
+REGION="${region}"
+REGISTRY="${ecr_registry}"
+REPOSITORY="${ecr_repository}"
+TAG_PARAM="${image_tag_param}"
+
+# IAM is eventually consistent: right after a role/policy is created, calls can fail for a few
+# seconds. Retry instead of failing the whole bootstrap.
+retry() {
+  local n=1
+  until "$@"; do
+    [ "$n" -ge 12 ] && { echo "giving up after $n attempts: $*"; return 1; }
+    echo "attempt $n failed, retrying in 5s: $*"; n=$((n + 1)); sleep 5
+  done
+}
+
+cd /opt/retail-health
+TAG=$(retry aws ssm get-parameter --region "$REGION" --name "$TAG_PARAM" --query Parameter.Value --output text)
+IMAGE="$REGISTRY/$REPOSITORY:$TAG"
+echo "Deploying $IMAGE"
+
+ecr_login() {
+  aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+}
+retry ecr_login
+
+# Compose reads .env in the project dir for $${VAR} substitution in docker-compose.yml.
+cat > .env <<ENV_EOF
+APP_IMAGE=$IMAGE
+DATA_PATH=/mnt/app-data
+ENV_EOF
+# Extra settings (e.g. DB connection in Phase 5) can be appended by other scripts.
+[ -f .env.extra ] && cat .env.extra >> .env
+
+docker compose pull
+docker compose up -d --no-build --remove-orphans
+
+for i in $(seq 1 30); do
+  if curl -fsS http://127.0.0.1/healthz > /dev/null; then
+    echo "OK: $IMAGE is healthy"
+    docker image prune -af --filter "until=24h" > /dev/null || true
+    exit 0
+  fi
+  sleep 2
+done
+echo "FAILED: health check did not pass"
+docker compose ps
+docker compose logs --tail 50
+exit 1
+DEPLOY_EOF
+chmod +x /usr/local/bin/deploy-app
+
+/usr/local/bin/deploy-app
+echo "bootstrap complete"
