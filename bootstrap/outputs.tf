@@ -12,6 +12,11 @@ output "github_ci_user_name" {
   value       = aws_iam_user.github_ci.name
 }
 
+output "github_plan_user_name" {
+  description = "Read-only IAM user for pull-request plan jobs."
+  value       = aws_iam_user.github_plan.name
+}
+
 output "project_iam_path" {
   description = "IAM path the main stack must use for roles / instance profiles."
   value       = local.iam_path

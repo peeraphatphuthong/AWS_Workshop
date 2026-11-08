@@ -10,9 +10,61 @@
 #   - key stored as a GitHub *Environment* secret and rotated regularly
 # ---------------------------------------------------------------------------------------------
 
+# Two CI identities = two blast radii (the same split you'd do with two OIDC roles):
+#   github-plan : READ-ONLY + state lock. Used by pull-request jobs (any branch).
+#   github-ci   : write access to project resources. Used only by jobs on `main`
+#                 (GitHub environments aws-dev / aws-dev-infra restrict branches + require approval).
+
 resource "aws_iam_user" "github_ci" {
   name = "${var.project}-github-ci"
   path = "/ci/"
+}
+
+resource "aws_iam_user" "github_plan" {
+  name = "${var.project}-github-plan"
+  path = "/ci/"
+}
+
+# AWS-managed ReadOnlyAccess covers Describe/Get/List for every service `terraform plan` refreshes.
+resource "aws_iam_user_policy_attachment" "github_plan_readonly" {
+  user       = aws_iam_user.github_plan.name
+  policy_arn = "arn:${local.partition}:iam::aws:policy/ReadOnlyAccess"
+}
+
+data "aws_iam_policy_document" "github_plan" {
+  # Plan takes the state lock (writes/deletes the .tflock object next to the state).
+  statement {
+    sid       = "StateBucketList"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.tfstate.arn]
+  }
+
+  statement {
+    sid       = "StateReadAndLock"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.tfstate.arn}/*"]
+  }
+
+  # Belt and braces: a PR job may only create/remove lock files, never overwrite state itself.
+  # (ReadOnlyAccess does not include secretsmanager:GetSecretValue, so secret values stay unreadable.)
+  statement {
+    sid           = "DenyStateWritesOutsideLockFiles"
+    effect        = "Deny"
+    actions       = ["s3:PutObject", "s3:DeleteObject"]
+    not_resources = ["${aws_s3_bucket.tfstate.arn}/*.tflock"]
+  }
+}
+
+resource "aws_iam_policy" "github_plan" {
+  name        = "${var.project}-github-plan"
+  path        = "/ci/"
+  description = "State lock access for ${var.github_repository} PR plan jobs; denies writes and secret reads"
+  policy      = data.aws_iam_policy_document.github_plan.json
+}
+
+resource "aws_iam_user_policy_attachment" "github_plan" {
+  user       = aws_iam_user.github_plan.name
+  policy_arn = aws_iam_policy.github_plan.arn
 }
 
 data "aws_iam_policy_document" "github_ci" {

@@ -1,6 +1,9 @@
 name: aws-access-check
 
-# Smoke test for the CI identity: proves the key works AND that least privilege is enforced.
+# Proves the least-privilege split of the two CI identities:
+#   plan user  (env aws-plan) : can read, cannot write, cannot read secret values
+#   deploy user(env aws-dev)  : not testable from a PR at all — its environment only allows `main`.
+#                               That restriction is itself the control being demonstrated.
 on:
   workflow_dispatch:
   pull_request:
@@ -12,12 +15,11 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  plan-user:
     runs-on: ubuntu-latest
-    environment: aws-sandbox
+    environment: aws-plan
     steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v5
+      - uses: aws-actions/configure-aws-credentials@v5
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -26,24 +28,29 @@ jobs:
       - name: Who am I
         run: aws sts get-caller-identity --query Arn --output text
 
-      - name: Can read Terraform state bucket
-        run: aws s3 ls "s3://${{ vars.TF_STATE_BUCKET }}/" --recursive
-
-      - name: Can use EC2 in the project region
-        run: aws ec2 describe-availability-zones --query "AvailabilityZones[].ZoneName" --output text
-
-      - name: Is BLOCKED outside the project region (least privilege)
+      - name: Can read state and describe resources
         run: |
-          if aws ec2 describe-vpcs --region us-east-1 > /dev/null 2>&1; then
-            echo "::error::CI user can access us-east-1 — policy is too broad"; exit 1
-          fi
-          echo "OK: us-east-1 denied as expected"
+          aws s3 ls "s3://${{ vars.TF_STATE_BUCKET }}/" --recursive
+          aws ec2 describe-vpcs --filters Name=tag:Project,Values=aws-workshop --query 'Vpcs[].VpcId' --output text
 
-      - name: Is BLOCKED from IAM writes outside the project path
+      - name: Is BLOCKED from overwriting state
         run: |
-          if aws iam create-role --role-name ci-should-not-create-this \
-               --assume-role-policy-document '{"Version":"2012-10-17","Statement":[]}' > /dev/null 2>&1; then
-            aws iam delete-role --role-name ci-should-not-create-this
-            echo "::error::CI user could create a role outside /aws-workshop/"; exit 1
+          echo test > probe.txt
+          if aws s3 cp probe.txt "s3://${{ vars.TF_STATE_BUCKET }}/infra/terraform.tfstate" > /dev/null 2>&1; then
+            echo "::error::plan user could overwrite state"; exit 1
           fi
-          echo "OK: IAM write outside project path denied as expected"
+          echo "OK: state overwrite denied"
+
+      - name: Is BLOCKED from reading secret values
+        run: |
+          if aws secretsmanager get-secret-value --secret-id /retail-health/dev/db/app > /dev/null 2>&1; then
+            echo "::error::plan user can read secret values"; exit 1
+          fi
+          echo "OK: GetSecretValue denied"
+
+      - name: Is BLOCKED from creating resources
+        run: |
+          if aws ec2 create-security-group --group-name ci-probe --description probe --dry-run 2>&1 | grep -q DryRunOperation; then
+            echo "::error::plan user could create a security group"; exit 1
+          fi
+          echo "OK: write denied"
