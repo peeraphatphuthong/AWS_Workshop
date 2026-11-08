@@ -6,6 +6,8 @@ crash.log
 crash.*.log
 *.tfplan
 tfplan
+plan.log
+apply.log
 # Variable files often hold secrets / account-specific values; commit *.tfvars.example instead
 *.tfvars
 *.tfvars.json

@@ -1,0 +1,3 @@
+# Copy to terraform.tfvars (git-ignored) and fill in.
+budget_alert_emails = ["you@example.com"]
+# budget_limit_usd  = 10

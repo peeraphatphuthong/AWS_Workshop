@@ -4,13 +4,14 @@ A hands-on, production-style project for learning **AWS** and **Terraform** end 
 infrastructure as code, GitOps-style CI/CD with GitHub Actions, a containerized web app,
 a managed database, monitoring, and cost control (FinOps).
 
-> Status: **Phase 0 — Setup** (see [docs/ROADMAP.md](docs/ROADMAP.md))
+> Status: **Phase 1 — Bootstrap done** (see [docs/ROADMAP.md](docs/ROADMAP.md))
 
 ## Target architecture
 
 ```
 GitHub (PR → CI → merge → CD)
-   │  OIDC federation (no long-lived AWS keys in GitHub)
+   │  Least-privilege CI IAM user, key in GitHub Environment secret + rotation
+   │  (OIDC is the preferred design but is denied by this sandbox's SCP — see docs/phase-1-bootstrap.md)
    ▼
 AWS (ap-southeast-2, Sydney)
  ├─ S3              Terraform remote state (+ native lockfile)
@@ -27,7 +28,7 @@ AWS (ap-southeast-2, Sydney)
 
 ```
 .
-├── bootstrap/        # Phase 1: state bucket + GitHub OIDC role (local state, run once)
+├── bootstrap/        # Phase 1: budget, state bucket, CI identity (run locally by an admin)
 ├── infra/            # Phase 2+: main Terraform stack (remote state in S3)
 ├── app/              # Phase 3: Node.js app, Dockerfile, NGINX config
 ├── scripts/          # FinOps / ops helper scripts
