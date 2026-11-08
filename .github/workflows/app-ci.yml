@@ -105,7 +105,7 @@ jobs:
     needs: build-scan
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    environment: aws-sandbox
+    environment: aws-dev # deploy user; environment only allows the main branch
     outputs:
       image: ${{ steps.meta.outputs.image }}
     steps:
@@ -148,3 +148,97 @@ jobs:
             echo "${{ steps.meta.outputs.image }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Continuous deployment to dev:
+  #   record current tag -> set desired tag in Parameter Store -> SSM Run Command deploy-app on the
+  #   web host -> smoke test through the public URL -> on any failure, roll back to the previous tag.
+  deploy:
+    needs: push
+    runs-on: ubuntu-latest
+    environment:
+      name: aws-dev
+      url: ${{ steps.target.outputs.url }}
+    env:
+      TAG_PARAM: /retail-health/dev/app/image-tag
+      WEB_NAME_TAG: aws-workshop-dev-web
+      NEW_TAG: ${{ github.sha }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Resolve target instance and URL
+        id: target
+        run: |
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=$WEB_NAME_TAG" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[].Instances[].InstanceId' --output text)
+          [ -n "$INSTANCE_ID" ] || { echo "::error::no running instance tagged $WEB_NAME_TAG"; exit 1; }
+          EIP=$(aws ec2 describe-addresses --filters "Name=instance-id,Values=$INSTANCE_ID" \
+            --query 'Addresses[0].PublicIp' --output text)
+          echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
+          echo "url=http://$EIP" >> "$GITHUB_OUTPUT"
+          PREV=$(aws ssm get-parameter --name "$TAG_PARAM" --query Parameter.Value --output text)
+          echo "previous_tag=$PREV" >> "$GITHUB_OUTPUT"
+          echo "Deploying ${NEW_TAG::7} to $INSTANCE_ID (previous ${PREV::7})"
+
+      - name: Set desired version
+        run: aws ssm put-parameter --name "$TAG_PARAM" --value "$NEW_TAG" --overwrite > /dev/null
+
+      - name: Run deploy-app via SSM
+        env:
+          INSTANCE_ID: ${{ steps.target.outputs.instance_id }}
+        run: |
+          set -euo pipefail
+          run_deploy() {
+            local cmd status
+            cmd=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
+              --document-name AWS-RunShellScript \
+              --comment "deploy $1 by ${GITHUB_ACTOR} run ${GITHUB_RUN_ID}" \
+              --parameters 'commands=["/usr/local/bin/deploy-app"]' \
+              --timeout-seconds 600 --query Command.CommandId --output text)
+            for _ in $(seq 1 60); do
+              status=$(aws ssm get-command-invocation --command-id "$cmd" --instance-id "$INSTANCE_ID" \
+                --query Status --output text 2>/dev/null || echo Pending)
+              case "$status" in Success|Failed|Cancelled|TimedOut) break ;; esac
+              sleep 5
+            done
+            aws ssm get-command-invocation --command-id "$cmd" --instance-id "$INSTANCE_ID" \
+              --query StandardOutputContent --output text | tail -n 15
+            echo "SSM status: $status"
+            [ "$status" = "Success" ]
+          }
+          run_deploy "${NEW_TAG::7}"
+
+      - name: Smoke test through the public URL
+        env:
+          URL: ${{ steps.target.outputs.url }}
+        run: |
+          for _ in $(seq 1 12); do
+            if curl -fsS "$URL/api/status" -o status.json; then break; fi
+            sleep 5
+          done
+          cat status.json; echo
+          jq -e --arg sha "$NEW_TAG" '.app.gitSha == $sha' status.json > /dev/null \
+            || { echo "::error::live version is not $NEW_TAG"; exit 1; }
+          jq -e '.db.status == "ok" and .ebs.status == "ok"' status.json > /dev/null \
+            || { echo "::error::dependency check failed after deploy"; exit 1; }
+          echo "### Deployed \`${NEW_TAG::7}\` to $URL ✅" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Roll back to previous version
+        if: failure() && steps.target.outputs.previous_tag != ''
+        env:
+          INSTANCE_ID: ${{ steps.target.outputs.instance_id }}
+          PREV: ${{ steps.target.outputs.previous_tag }}
+        run: |
+          echo "::warning::Deploy failed - rolling back to ${PREV::7}"
+          aws ssm put-parameter --name "$TAG_PARAM" --value "$PREV" --overwrite > /dev/null
+          cmd=$(aws ssm send-command --instance-ids "$INSTANCE_ID" --document-name AWS-RunShellScript \
+            --comment "rollback to ${PREV::7}" --parameters 'commands=["/usr/local/bin/deploy-app"]' \
+            --query Command.CommandId --output text)
+          sleep 60
+          aws ssm get-command-invocation --command-id "$cmd" --instance-id "$INSTANCE_ID" \
+            --query '[Status,StandardOutputContent]' --output text | tail -n 5
+          echo "### ❌ Deploy of \`${NEW_TAG::7}\` failed - rolled back to \`${PREV::7}\`" >> "$GITHUB_STEP_SUMMARY"
