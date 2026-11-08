@@ -19,7 +19,10 @@ RUN apk upgrade --no-cache \
 WORKDIR /app
 
 # Amazon RDS CA bundle: lets the app verify the database's TLS certificate.
-ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /app/certs/rds-global-bundle.pem
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /app/certs/rds-global-bundle.pem
+# ADD from a URL creates the file (and its parent dir) readable by root only -> the non-root
+# "node" user got EACCES at runtime. Make both world-readable (it's a public CA bundle).
+RUN chmod 0755 /app/certs && chmod 0644 /app/certs/rds-global-bundle.pem
 
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node package.json ./
