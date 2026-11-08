@@ -16,6 +16,7 @@ resource "aws_budgets_budget" "monthly" {
       threshold_type             = "PERCENTAGE"
       notification_type          = "ACTUAL"
       subscriber_email_addresses = var.budget_alert_emails
+      subscriber_sns_topic_arns  = [aws_sns_topic.alerts.arn]
     }
   }
 
@@ -26,5 +27,9 @@ resource "aws_budgets_budget" "monthly" {
     threshold_type             = "PERCENTAGE"
     notification_type          = "FORECASTED"
     subscriber_email_addresses = var.budget_alert_emails
+    subscriber_sns_topic_arns  = [aws_sns_topic.alerts.arn]
   }
+
+  # The topic policy must allow budgets.amazonaws.com to publish before notifications are attached.
+  depends_on = [aws_sns_topic_policy.alerts]
 }

@@ -66,6 +66,21 @@ resource "aws_iam_role_policy" "web_params" {
   policy = data.aws_iam_policy_document.web_params.json
 }
 
+# Write container logs (Docker awslogs driver runs in dockerd on the host and uses the instance role).
+# Only into this stack's log group; the group itself is created by Terraform, not by the host.
+data "aws_iam_policy_document" "web_logs" {
+  statement {
+    actions   = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
+    resources = ["${aws_cloudwatch_log_group.containers.arn}:*"]
+  }
+}
+
+resource "aws_iam_role_policy" "web_logs" {
+  name   = "write-container-logs"
+  role   = aws_iam_role.web.id
+  policy = data.aws_iam_policy_document.web_logs.json
+}
+
 resource "aws_iam_instance_profile" "web" {
   name = "${local.name_prefix}-web"
   path = "/${var.project}/"

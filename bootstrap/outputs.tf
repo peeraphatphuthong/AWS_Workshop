@@ -21,3 +21,8 @@ output "project_iam_path" {
   description = "IAM path the main stack must use for roles / instance profiles."
   value       = local.iam_path
 }
+
+output "alerts_topic_name" {
+  description = "SNS topic for CloudWatch alarms and budget alerts (infra looks it up by this name)."
+  value       = aws_sns_topic.alerts.name
+}

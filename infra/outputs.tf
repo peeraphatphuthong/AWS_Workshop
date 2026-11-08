@@ -81,3 +81,21 @@ output "ecr_repository_url" {
   description = "Push/pull URL of the app image repository."
   value       = aws_ecr_repository.app.repository_url
 }
+
+output "dashboard_url" {
+  description = "CloudWatch dashboard for this environment."
+  value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards/dashboard/${aws_cloudwatch_dashboard.main.dashboard_name}"
+}
+
+output "container_log_group" {
+  value = aws_cloudwatch_log_group.containers.name
+}
+
+output "alarm_names" {
+  value = concat([for a in aws_cloudwatch_metric_alarm.this : a.alarm_name], [aws_cloudwatch_metric_alarm.ec2_auto_recover.alarm_name])
+}
+
+output "office_hours" {
+  description = "When EC2/RDS are running (EventBridge Scheduler)."
+  value       = var.office_hours.enabled ? "${var.office_hours.timezone}: RDS ${var.office_hours.start_db} -> web ${var.office_hours.start_web}; stop web ${var.office_hours.stop_web} -> RDS ${var.office_hours.stop_db}" : "disabled (always on)"
+}

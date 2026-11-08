@@ -10,6 +10,24 @@ DATA_DIR=/mnt/app-data
 
 # ---------------------------------------------------------------- 1. Docker + Compose plugin
 dnf install -y docker jq
+
+# Default log driver for every container on this host: CloudWatch Logs, one stream per container
+# name. Written BEFORE dockerd starts. "non-blocking" = if CloudWatch is slow, drop log lines
+# instead of blocking the app. `docker logs` keeps working (Docker's dual logging cache).
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json <<'DAEMON_EOF'
+{
+  "log-driver": "awslogs",
+  "log-opts": {
+    "awslogs-region": "${region}",
+    "awslogs-group": "${container_log_group}",
+    "awslogs-create-group": "false",
+    "tag": "{{.Name}}",
+    "mode": "non-blocking",
+    "max-buffer-size": "4m"
+  }
+}
+DAEMON_EOF
 systemctl enable --now docker
 
 PLUGIN_DIR=/usr/local/lib/docker/cli-plugins

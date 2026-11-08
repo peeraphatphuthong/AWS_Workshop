@@ -14,6 +14,13 @@ locals {
   # Parameter Store / Secrets Manager path for app settings of this environment.
   param_prefix = "/retail-health/${var.environment}"
 
+  # Custom CloudWatch metrics (health check, nginx 5xx) live in this namespace.
+  metric_namespace = "RetailHealth/${var.environment}"
+
+  # RDS identifier is needed before the instance exists (log group names), so build it here.
+  db_identifier   = "${local.name_prefix}-mysql"
+  rds_log_exports = ["error", "slowquery"]
+
   # Take the first N AZs instead of hard-coding "ap-southeast-2a" etc.
   azs = slice(sort(data.aws_availability_zones.available.names), 0, var.az_count)
 

@@ -91,3 +91,46 @@ variable "web_ingress" {
   ]
   # No port 22: shell access goes through SSM Session Manager (Phase 4).
 }
+
+# ---------------------------------------------------------------- Phase 7: observability & FinOps
+variable "alerts_topic_name" {
+  description = "Existing SNS topic for alarms (created by the bootstrap stack, which holds the email subscription)."
+  type        = string
+  default     = "aws-workshop-alerts"
+}
+
+variable "log_retention_days" {
+  description = "Retention for every CloudWatch log group of this stack."
+  type        = number
+  default     = 7
+}
+
+variable "office_hours" {
+  description = <<-EOT
+    Stop EC2 + RDS outside working hours with EventBridge Scheduler (cron in local time).
+    Start RDS before EC2 (it takes ~5-10 min) and stop EC2 before RDS, so the app never runs
+    without its database.
+  EOT
+  type = object({
+    enabled   = bool
+    timezone  = string
+    start_db  = string
+    start_web = string
+    stop_web  = string
+    stop_db   = string
+  })
+  default = {
+    enabled   = true
+    timezone  = "Asia/Bangkok"
+    start_db  = "cron(30 7 * * ? *)"  # 07:30
+    start_web = "cron(0 8 * * ? *)"   # 08:00
+    stop_web  = "cron(0 22 * * ? *)"  # 22:00
+    stop_db   = "cron(10 22 * * ? *)" # 22:10
+  }
+}
+
+variable "health_check_rate" {
+  description = "How often the synthetic health check calls /readyz."
+  type        = string
+  default     = "rate(5 minutes)"
+}

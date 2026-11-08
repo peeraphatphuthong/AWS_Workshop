@@ -21,3 +21,13 @@ misconfigurations:
       to the DB SG). Production alternative: interface VPC endpoints (~$7/month each) + S3 gateway
       endpoint + an egress proxy / Network Firewall allow-list.
     expired_at: 2027-05-08
+
+  - id: AWS-0095
+    paths:
+      - "bootstrap/alerts.tf"
+    statement: >-
+      Alert SNS topic is not encrypted at rest. CloudWatch alarms cannot publish to a topic encrypted
+      with the AWS-managed aws/sns key, so encryption would need a customer-managed KMS key (~$1/month).
+      Messages contain only alarm names/metric values (no secrets or personal data); publish is limited
+      to this account's CloudWatch/Budgets by the topic policy. Use a CMK in production.
+    expired_at: 2027-05-08
