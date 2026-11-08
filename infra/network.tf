@@ -64,6 +64,14 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private.id
 }
 
+# Every VPC also gets a "main" route table, used by any subnet without an explicit association.
+# Adopting it (no extra routes = local only) makes it visible in code and prevents someone adding a
+# route to it by hand. Added in Phase 6 to exercise the PR-plan -> approval -> apply flow.
+resource "aws_default_route_table" "main" {
+  default_route_table_id = aws_vpc.main.default_route_table_id
+  tags                   = { Name = "${local.name_prefix}-main-rt-unused" }
+}
+
 # Every VPC gets a "default" SG that allows all traffic between its members.
 # Taking it over with no rules means nothing can accidentally use it (CIS benchmark 5.4).
 resource "aws_default_security_group" "default" {
