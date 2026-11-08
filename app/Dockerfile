@@ -17,6 +17,10 @@ RUN apk upgrade --no-cache \
  && mkdir -p /data && chown node:node /data
 
 WORKDIR /app
+
+# Amazon RDS CA bundle: lets the app verify the database's TLS certificate.
+ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /app/certs/rds-global-bundle.pem
+
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node package.json ./
 COPY --chown=node:node src ./src

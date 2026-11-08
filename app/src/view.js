@@ -87,8 +87,10 @@ export function renderDashboard(s) {
     ${card('Database — RDS MySQL', db, [
       ['Endpoint', db.host],
       ['Engine version', db.version],
-      ['Query latency', db.latencyMs !== undefined ? `${db.latencyMs} ms` : undefined],
-      ['Server time', db.serverTime],
+      ['TLS cipher', db.tls],
+      ['Round-trip (write + read)', db.latencyMs !== undefined ? `${db.latencyMs} ms` : undefined],
+      ['Store checks recorded', db.totalChecks],
+      ['Last store checked', db.lastStore],
     ])}
   </div>
   <footer>

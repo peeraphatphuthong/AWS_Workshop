@@ -15,6 +15,7 @@ export function loadConfig(env = process.env) {
       user: env.DB_USER ?? '',
       password: env.DB_PASSWORD ?? '',
       database: env.DB_NAME ?? '',
+      sslCa: env.DB_SSL_CA ?? '',
     },
   };
 }
