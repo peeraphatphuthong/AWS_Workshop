@@ -4,7 +4,7 @@ A hands-on, production-style project for learning **AWS** and **Terraform** end 
 infrastructure as code, GitOps-style CI/CD with GitHub Actions, a containerized web app,
 a managed database, monitoring, and cost control (FinOps).
 
-> Status: **Phase 1 — Bootstrap done** (see [docs/ROADMAP.md](docs/ROADMAP.md))
+> Status: **Phase 2 — Network done** (see [docs/ROADMAP.md](docs/ROADMAP.md))
 
 ## Target architecture
 
