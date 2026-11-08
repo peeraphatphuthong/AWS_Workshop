@@ -7,7 +7,7 @@ Each phase ends with a `docs/phase-N-*.md` note (concepts, commands, interview Q
 |---|---|---|---|---|
 | 0 | Setup | Tools installed, AWS/GitHub auth, repo skeleton, first push | IAM basics, regions, billing | ✅ Done |
 | 1 | Bootstrap | S3 state bucket, AWS Budget, CI IAM user (OIDC blocked by SCP) | Remote state, locking, SCPs, least privilege | ✅ Done |
-| 2 | Network | VPC, public/private subnets in 2 AZs, IGW, route tables, security groups | `for_each`, `locals`, `cidrsubnet`, dynamic blocks | ⬜ |
+| 2 | Network | VPC, public/private subnets in 2 AZs, IGW, route tables, security groups | `for_each`, `locals`, `cidrsubnet`, SG references | ✅ Done |
 | 3 | App + ECR | Node.js dashboard app, Dockerfile, NGINX, build & push to ECR in Actions | Container registry, image tagging | ⬜ |
 | 4 | Compute | EC2 + EIP + EBS (same AZ), user_data mount, instance profile, SSM | Zonal resources, dependency graph, `-replace`, `-target` | ⬜ |
 | 5 | Database | RDS MySQL (private), SG-to-SG rule, Secrets Manager | Least privilege networking, secret handling | ⬜ |
