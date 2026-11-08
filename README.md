@@ -4,7 +4,7 @@ A hands-on, production-style project for learning **AWS** and **Terraform** end 
 infrastructure as code, GitOps-style CI/CD with GitHub Actions, a containerized web app,
 a managed database, monitoring, and cost control (FinOps).
 
-> Status: **Phase 4 — Compute done, app live on EC2** (`terraform -chdir=infra output web_url`) (see [docs/ROADMAP.md](docs/ROADMAP.md))
+> Status: **Phase 5 — Database done, app live on EC2 + RDS** (`terraform -chdir=infra output web_url`) (see [docs/ROADMAP.md](docs/ROADMAP.md))
 
 ## Target architecture
 
@@ -20,7 +20,7 @@ AWS (ap-southeast-2, Sydney)
      ├─ Public subnet   EC2 t3.micro + Elastic IP + EBS gp3
      │                  Docker: NGINX reverse proxy → Node.js app
      │                  Access via SSM Session Manager (no SSH port 22)
-     └─ Private subnets RDS MySQL db.t3.micro (password in Secrets Manager)
+     └─ Private subnets RDS MySQL 8.4 db.t4g.micro (TLS only, creds in Secrets Manager)
  CloudWatch Alarms → SNS email · AWS Budgets · EventBridge Scheduler (stop off-hours)
 ```
 

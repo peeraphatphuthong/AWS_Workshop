@@ -9,14 +9,23 @@ APP_DIR=/opt/retail-health
 DATA_DIR=/mnt/app-data
 
 # ---------------------------------------------------------------- 1. Docker + Compose plugin
-dnf install -y docker
+dnf install -y docker jq
 systemctl enable --now docker
 
 PLUGIN_DIR=/usr/local/lib/docker/cli-plugins
 mkdir -p "$PLUGIN_DIR"
-curl -fsSL -o "$PLUGIN_DIR/docker-compose" \
-  "https://github.com/docker/compose/releases/download/${compose_version}/docker-compose-linux-x86_64"
-# Verify the download against the published checksum before executing it.
+# Two sources, ONE checksum. GitHub release downloads returned HTTP 504 for a long period during
+# Phase 5 and killed the bootstrap (set -e). Fallback: the same binary published by Docker as the
+# image docker/compose-bin (verified identical sha256). Long-term fix: bake it into a custom AMI.
+if ! curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 --connect-timeout 10 \
+       -o "$PLUGIN_DIR/docker-compose" \
+       "https://github.com/docker/compose/releases/download/${compose_version}/docker-compose-linux-x86_64"; then
+  echo "GitHub download failed, falling back to docker/compose-bin:${compose_version}"
+  CID=$(docker create "docker/compose-bin:${compose_version}" x)
+  docker cp "$CID:/docker-compose" "$PLUGIN_DIR/docker-compose"
+  docker rm "$CID"
+fi
+# Whatever the source, verify against the pinned checksum before executing it.
 echo "${compose_sha256}  $PLUGIN_DIR/docker-compose" | sha256sum -c -
 chmod +x "$PLUGIN_DIR/docker-compose"
 docker compose version
@@ -68,6 +77,7 @@ REGION="${region}"
 REGISTRY="${ecr_registry}"
 REPOSITORY="${ecr_repository}"
 TAG_PARAM="${image_tag_param}"
+DB_APP_SECRET_ARN="${db_app_secret_arn}"
 
 # IAM is eventually consistent: right after a role/policy is created, calls can fail for a few
 # seconds. Retry instead of failing the whole bootstrap.
@@ -89,13 +99,21 @@ ecr_login() {
 }
 retry ecr_login
 
+# DB credentials: fetched from Secrets Manager at deploy time, never baked into the image or repo.
+DB_SECRET=$(retry aws secretsmanager get-secret-value --region "$REGION" --secret-id "$DB_APP_SECRET_ARN" --query SecretString --output text)
+
 # Compose reads .env in the project dir for $${VAR} substitution in docker-compose.yml.
+umask 077   # .env holds a password -> readable by root only
 cat > .env <<ENV_EOF
 APP_IMAGE=$IMAGE
 DATA_PATH=/mnt/app-data
+DB_HOST=$(jq -r .host <<< "$DB_SECRET")
+DB_PORT=$(jq -r .port <<< "$DB_SECRET")
+DB_NAME=$(jq -r .dbname <<< "$DB_SECRET")
+DB_USER=$(jq -r .username <<< "$DB_SECRET")
+DB_PASSWORD=$(jq -r .password <<< "$DB_SECRET")
 ENV_EOF
-# Extra settings (e.g. DB connection in Phase 5) can be appended by other scripts.
-[ -f .env.extra ] && cat .env.extra >> .env
+unset DB_SECRET
 
 docker compose pull
 docker compose up -d --no-build --remove-orphans
@@ -115,5 +133,62 @@ exit 1
 DEPLOY_EOF
 chmod +x /usr/local/bin/deploy-app
 
+# ---------------------------------------------------------------- 5. DB bootstrap (idempotent)
+# Creates/updates the least-privilege application user with the master credentials.
+# Safe to re-run any time, e.g. after rotating the app password (ALTER USER syncs it).
+cat > /usr/local/bin/db-bootstrap <<'DBBOOT_EOF'
+#!/bin/bash
+set -euo pipefail
+REGION="${region}"
+MASTER_SECRET_ARN="${db_master_secret_arn}"
+APP_SECRET_ARN="${db_app_secret_arn}"
+CA=/opt/retail-health/rds-global-bundle.pem
+
+retry() {
+  local n=1
+  until "$@"; do
+    [ "$n" -ge 12 ] && return 1
+    echo "attempt $n failed, retrying in 10s"; n=$((n + 1)); sleep 10
+  done
+}
+
+[ -f "$CA" ] || curl -fsSL --retry 8 --retry-all-errors --retry-delay 5 -o "$CA" \
+  https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+
+MASTER=$(retry aws secretsmanager get-secret-value --region "$REGION" --secret-id "$MASTER_SECRET_ARN" --query SecretString --output text)
+APP=$(retry aws secretsmanager get-secret-value --region "$REGION" --secret-id "$APP_SECRET_ARN" --query SecretString --output text)
+
+HOST=$(jq -r .host <<< "$APP")
+DB=$(jq -r .dbname <<< "$APP")
+APP_USER=$(jq -r .username <<< "$APP")
+APP_PASS=$(jq -r .password <<< "$APP")
+
+# Password goes in through the MYSQL_PWD env var (`-e NAME` passes it through without putting
+# the value on any command line — argv is visible in `ps`).
+# --ssl-mode=VERIFY_IDENTITY: encrypted AND the server certificate/hostname are verified.
+MYSQL_PWD=$(jq -r .password <<< "$MASTER")
+export MYSQL_PWD
+mysql_admin() {
+  docker run --rm -i \
+    -e MYSQL_PWD \
+    -v "$CA:/ca.pem:ro" \
+    mysql:8.4 mysql --host="$HOST" --user="$(jq -r .username <<< "$MASTER")" \
+      --ssl-mode=VERIFY_IDENTITY --ssl-ca=/ca.pem "$@"
+}
+
+retry mysql_admin -e "SELECT 1" > /dev/null
+
+mysql_admin <<SQL
+CREATE USER IF NOT EXISTS '$APP_USER'@'%' IDENTIFIED BY '$APP_PASS' REQUIRE SSL;
+ALTER USER '$APP_USER'@'%' IDENTIFIED BY '$APP_PASS' REQUIRE SSL;
+-- Least privilege: data access + CREATE for the app's own table, nothing server-wide.
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, INDEX ON \`$DB\`.* TO '$APP_USER'@'%';
+FLUSH PRIVILEGES;
+SQL
+echo "db-bootstrap: user $APP_USER ready on $HOST/$DB"
+DBBOOT_EOF
+chmod 700 /usr/local/bin/db-bootstrap
+
+/usr/local/bin/db-bootstrap
 /usr/local/bin/deploy-app
 echo "bootstrap complete"

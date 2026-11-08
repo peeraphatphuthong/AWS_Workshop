@@ -63,6 +63,8 @@ resource "aws_instance" "web" {
     image_tag_param = local.image_tag_param_name
     # EBS volume ID lets the script find the right NVMe device (see note on aws_ebs_volume).
     data_volume_id         = aws_ebs_volume.app_data.id
+    db_app_secret_arn      = aws_secretsmanager_secret.db_app.arn
+    db_master_secret_arn   = aws_db_instance.mysql.master_user_secret[0].secret_arn
     compose_version        = "v5.6.1"
     compose_sha256         = "47737f4236e6d3ccea7291995203f8f018058783b4c3a9469119811a0b5db8c0"
     docker_compose_content = file("${path.module}/../app/docker-compose.yml")
@@ -89,6 +91,8 @@ resource "aws_instance" "web" {
     aws_iam_role_policy_attachment.web_ssm,
     aws_iam_role_policy_attachment.web_ecr,
     aws_iam_role_policy.web_params,
+    aws_iam_role_policy.web_db_secrets,
+    aws_secretsmanager_secret_version.db_app, # secret must have a value before first boot
   ]
 }
 
