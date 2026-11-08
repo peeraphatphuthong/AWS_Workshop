@@ -23,7 +23,9 @@ concurrency:
 
 env:
   ECR_REPOSITORY: aws-workshop/retail-health
-  TRIVY_IMAGE: aquasec/trivy:0.58.1 # pinned scanner version (supply-chain hygiene)
+  # Pinned by tag AND digest: the digest can't be moved even if the tag is re-pushed.
+  # Keep the scanner current — an outdated 0.58.1 missed CVE-2026-4738 (see docs/phase-3-app-ecr.md).
+  TRIVY_IMAGE: aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
 
 jobs:
   test:
@@ -73,6 +75,17 @@ jobs:
           curl -fsS http://127.0.0.1:3000/api/status | tee status.json
           grep -q '"gitSha":"${{ github.sha }}"' status.json
           docker rm -f smoke
+
+      - name: Trivy — report all HIGH/CRITICAL (including unfixed)
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$HOME/.cache/trivy:/root/.cache/trivy" \
+            "$TRIVY_IMAGE" image \
+              --severity HIGH,CRITICAL \
+              --exit-code 0 \
+              --no-progress \
+              retail-health:${{ github.sha }}
 
       - name: Trivy — fail on fixable HIGH/CRITICAL vulnerabilities
         run: |

@@ -9,8 +9,11 @@ RUN npm ci --omit=dev --no-audit --no-fund
 # ---- Stage 2: minimal runtime image ----
 FROM node:24-alpine AS runtime
 
-# npm/npx are not needed at runtime and carry their own dependency CVEs — remove them.
-RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+# 1) apk upgrade: pull OS security patches released after the base image was built
+#    (e.g. zlib CVE-2026-4738 was fixed in Alpine before node:24-alpine was rebuilt).
+# 2) npm/npx are not needed at runtime and carry their own dependency CVEs — remove them.
+RUN apk upgrade --no-cache \
+ && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
  && mkdir -p /data && chown node:node /data
 
 WORKDIR /app

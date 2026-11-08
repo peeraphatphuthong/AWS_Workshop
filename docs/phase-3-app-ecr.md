@@ -82,5 +82,28 @@ With Docker: `docker compose up --build` → http://localhost
   A: Instance profile role with `AmazonEC2ContainerRegistryReadOnly`; the SDK/CLI gets temporary credentials from
   IMDS, then `ecr get-login-password`.
 
+## Incident note — CVE-2026-4738 (zlib) missed by CI scan
+**What happened**
+1. PR pipeline: Trivy `0.58.1` with `--ignore-unfixed` → `Total: 0 (HIGH: 0, CRITICAL: 0)`, PR merged.
+2. main pipeline pushed `:ad1c381…` to ECR. ECR scan-on-push reported **1 CRITICAL**: CVE-2026-4738 in
+   `zlib 1.3.2-r1` (CVSS 9.4), inherited from the `node:24-alpine` base image.
+3. Alpine's security DB showed the fix already released in `zlib 1.4-r0`.
+
+**Root causes**
+- The base image was built before the zlib fix; nothing in our build pulled newer OS packages.
+- The pinned scanner was ~2 years old. Pinning is good for supply-chain safety, but a pinned scanner must still be
+  updated regularly or its detection logic falls behind.
+
+**Fix** (PR "fix: patch zlib CVE-2026-4738")
+- `apk upgrade --no-cache` in the runtime stage → OS patches applied on every build.
+- Trivy bumped to `0.76.1`, pinned by tag **and digest**.
+- Extra non-blocking Trivy step that lists *all* HIGH/CRITICAL (including unfixed) so they're visible, while the
+  blocking step still fails only on fixable ones.
+
+**Lessons / talking points**
+- Defense in depth: scanning in CI *and* in the registry caught what one layer missed.
+- Images rot: a never-rebuilt image accumulates CVEs. Follow-ups a real team would add: scheduled weekly rebuild,
+  Dependabot/Renovate for base image digests, ECR enhanced scanning (Inspector) for continuous re-scans.
+
 ## Cost
 ECR: $0.10/GB-month — one ~60 MB image ≈ $0.006/month. The lifecycle policy caps it at 10 images.
