@@ -4,13 +4,13 @@ A hands-on, production-style project for learning **AWS** and **Terraform** end 
 infrastructure as code, GitOps-style CI/CD with GitHub Actions, a containerized web app,
 a managed database, monitoring, and cost control (FinOps).
 
-> Status: **Phase 5 — Database done, app live on EC2 + RDS** (`terraform -chdir=infra output web_url`) (see [docs/ROADMAP.md](docs/ROADMAP.md))
+> Status: **Phase 6 — CI/CD done**: PR plan comments, approval-gated `terraform apply`, auto deploy with rollback (`terraform -chdir=infra output web_url`) (see [docs/ROADMAP.md](docs/ROADMAP.md))
 
 ## Target architecture
 
 ```
 GitHub (PR → CI → merge → CD)
-   │  Least-privilege CI IAM user, key in GitHub Environment secret + rotation
+   │  PR jobs: read-only IAM user · main jobs: deploy IAM user (+ approval for terraform apply)
    │  (OIDC is the preferred design but is denied by this sandbox's SCP — see docs/phase-1-bootstrap.md)
    ▼
 AWS (ap-southeast-2, Sydney)
