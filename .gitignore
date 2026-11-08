@@ -1,0 +1,35 @@
+# --- Terraform ---
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfplan
+tfplan
+# Variable files often hold secrets / account-specific values; commit *.tfvars.example instead
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# --- Node.js ---
+node_modules/
+npm-debug.log*
+
+# --- Secrets / local env ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
