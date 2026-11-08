@@ -1,0 +1,135 @@
+name: app-ci
+
+# PR:   test → build → Trivy scan          (no AWS credentials)
+# main: test → build → scan → push to ECR  (tag = git SHA, immutable)
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - ".github/workflows/app-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/app-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ECR_REPOSITORY: aws-workshop/retail-health
+  TRIVY_IMAGE: aquasec/trivy:0.58.1 # pinned scanner version (supply-chain hygiene)
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+
+  build-scan:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image (load into local Docker for scanning)
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          load: true
+          tags: retail-health:${{ github.sha }}
+          build-args: |
+            APP_VERSION=0.1.0
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the container
+        run: |
+          docker run -d --name smoke -e IMDS_DISABLED=true -p 3000:3000 retail-health:${{ github.sha }}
+          for i in $(seq 1 20); do
+            curl -fsS http://127.0.0.1:3000/healthz && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:3000/api/status | tee status.json
+          grep -q '"gitSha":"${{ github.sha }}"' status.json
+          docker rm -f smoke
+
+      - name: Trivy — fail on fixable HIGH/CRITICAL vulnerabilities
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$HOME/.cache/trivy:/root/.cache/trivy" \
+            "$TRIVY_IMAGE" image \
+              --severity HIGH,CRITICAL \
+              --ignore-unfixed \
+              --exit-code 1 \
+              --no-progress \
+              retail-health:${{ github.sha }}
+
+  push:
+    needs: build-scan
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: aws-sandbox
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Image name
+        id: meta
+        run: echo "image=${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Rebuild is near-instant thanks to the GitHub Actions layer cache from build-scan.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          push: true
+          tags: ${{ steps.meta.outputs.image }}
+          build-args: |
+            APP_VERSION=0.1.0
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          provenance: false
+
+      - name: Summary
+        run: |
+          {
+            echo "### Image pushed"
+            echo '```'
+            echo "${{ steps.meta.outputs.image }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
