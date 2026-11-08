@@ -21,6 +21,7 @@ terraform.rc
 
 # --- Node.js ---
 node_modules/
+app/.data/
 npm-debug.log*
 
 # --- Secrets / local env ---

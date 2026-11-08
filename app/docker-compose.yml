@@ -1,0 +1,35 @@
+# Runs on the EC2 host (Phase 4). Locally: `docker compose up --build` (IMDS is skipped automatically
+# when unreachable). APP_IMAGE is set by the deploy step to the ECR image pinned by git SHA.
+services:
+  app:
+    image: ${APP_IMAGE:-retail-health:local}
+    build: .
+    restart: unless-stopped
+    environment:
+      DATA_DIR: /data
+      DB_HOST: ${DB_HOST:-}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-}
+      DB_PASSWORD: ${DB_PASSWORD:-}
+      DB_NAME: ${DB_NAME:-}
+    volumes:
+      # Host path where the EBS volume is mounted -> container data dir.
+      - ${DATA_PATH:-./.data}:/data
+    expose:
+      - "3000"   # only reachable from other containers, not from the host network
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  nginx:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro

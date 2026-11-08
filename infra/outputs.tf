@@ -29,3 +29,8 @@ output "web_security_group_id" {
 output "db_security_group_id" {
   value = aws_security_group.db.id
 }
+
+output "ecr_repository_url" {
+  description = "Push/pull URL of the app image repository."
+  value       = aws_ecr_repository.app.repository_url
+}
