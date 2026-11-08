@@ -1,0 +1,49 @@
+name: aws-access-check
+
+# Smoke test for the CI identity: proves the key works AND that least privilege is enforced.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "bootstrap/**"
+      - ".github/workflows/aws-access-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    environment: aws-sandbox
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Who am I
+        run: aws sts get-caller-identity --query Arn --output text
+
+      - name: Can read Terraform state bucket
+        run: aws s3 ls "s3://${{ vars.TF_STATE_BUCKET }}/" --recursive
+
+      - name: Can use EC2 in the project region
+        run: aws ec2 describe-availability-zones --query "AvailabilityZones[].ZoneName" --output text
+
+      - name: Is BLOCKED outside the project region (least privilege)
+        run: |
+          if aws ec2 describe-vpcs --region us-east-1 > /dev/null 2>&1; then
+            echo "::error::CI user can access us-east-1 — policy is too broad"; exit 1
+          fi
+          echo "OK: us-east-1 denied as expected"
+
+      - name: Is BLOCKED from IAM writes outside the project path
+        run: |
+          if aws iam create-role --role-name ci-should-not-create-this \
+               --assume-role-policy-document '{"Version":"2012-10-17","Statement":[]}' > /dev/null 2>&1; then
+            aws iam delete-role --role-name ci-should-not-create-this
+            echo "::error::CI user could create a role outside /aws-workshop/"; exit 1
+          fi
+          echo "OK: IAM write outside project path denied as expected"
