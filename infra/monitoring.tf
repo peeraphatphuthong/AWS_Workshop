@@ -30,16 +30,18 @@ locals {
       operator    = "GreaterThanThreshold"
       threshold   = 80
     }
-    "ec2-cpu-credits-low" = {
-      description = "Web host is running out of CPU credits (standard mode throttles to 10% baseline at 0)."
+    "ec2-cpu-surplus-high" = {
+      # Unlimited mode: surplus credits = CPU used above baseline that wasn't earned yet. Boot spends
+      # a few; > 60 (one vCPU flat out for an hour) means sustained load that will show up on the bill.
+      description = "Web host spent > 60 surplus CPU credits (unlimited mode, billed at $0.05/vCPU-hour if not earned back)."
       namespace   = "AWS/EC2"
-      metric      = "CPUCreditBalance"
+      metric      = "CPUSurplusCreditBalance"
       dimensions  = { InstanceId = aws_instance.web.id }
-      statistic   = "Minimum"
+      statistic   = "Maximum"
       period      = 300
       periods     = 1
-      operator    = "LessThanThreshold"
-      threshold   = 20
+      operator    = "GreaterThanThreshold"
+      threshold   = 60
     }
     # ---------------------------------------------------------------- RDS
     "rds-cpu-high" = {
