@@ -16,6 +16,9 @@ data "archive_file" "healthcheck" {
   type        = "zip"
   source_file = "${path.module}/lambda/healthcheck.py"
   output_path = "${path.module}/.build/healthcheck.zip"
+  # Fixed permissions: a zip built on Windows otherwise differs from one built on Linux (CI), which
+  # shows up as a fake source_code_hash diff when planning from a laptop.
+  output_file_mode = "0644"
 }
 
 resource "aws_cloudwatch_log_group" "healthcheck" {

@@ -118,6 +118,8 @@ log ingestion (cents). Alarms, dashboard, Lambda, Scheduler, SNS email are withi
 - `[ -n "$line" ] && say ...` as the last command of a function under `set -e` made the audit script exit
   silently with code 1 (same trap as Phase 6). Use `if … then … fi`.
 - T3 `standard` credit mode: no launch credits, so the new instance was throttled to 10% CPU during boot (see FinOps).
+- Planning from Windows showed a fake diff on the Lambda `source_code_hash`: the zip stores file permissions,
+  which differ between Windows and Linux (CI). Fixed with `output_file_mode = "0644"` on `archive_file`.
 - `jq` isn't installed in Git Bash on Windows → the script uses only `--query` (JMESPath) + `awk`.
 
 ## Interview Q&A
