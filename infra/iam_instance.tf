@@ -39,6 +39,27 @@ data "aws_iam_policy_document" "web_params" {
   }
 }
 
+# Read DB credentials:
+#  - app secret: used by deploy-app on every deploy
+#  - master secret: used only by db-bootstrap to create/update the least-privilege app user.
+#    Trade-off: the host could read the master password. Stricter alternative: run the bootstrap
+#    from a short-lived Lambda/ECS task in the VPC and give the web role only the app secret.
+data "aws_iam_policy_document" "web_db_secrets" {
+  statement {
+    actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+    resources = [
+      aws_secretsmanager_secret.db_app.arn,
+      aws_db_instance.mysql.master_user_secret[0].secret_arn,
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "web_db_secrets" {
+  name   = "read-db-secrets"
+  role   = aws_iam_role.web.id
+  policy = data.aws_iam_policy_document.web_db_secrets.json
+}
+
 resource "aws_iam_role_policy" "web_params" {
   name   = "read-app-parameters"
   role   = aws_iam_role.web.id

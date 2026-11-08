@@ -12,6 +12,7 @@ services:
       DB_USER: ${DB_USER:-}
       DB_PASSWORD: ${DB_PASSWORD:-}
       DB_NAME: ${DB_NAME:-}
+      DB_SSL_CA: /app/certs/rds-global-bundle.pem
     volumes:
       # Host path where the EBS volume is mounted -> container data dir.
       - ${DATA_PATH:-./.data}:/data

@@ -64,6 +64,19 @@ output "image_tag_parameter" {
   value = aws_ssm_parameter.image_tag.name
 }
 
+output "rds_endpoint" {
+  description = "Private DNS name of the MySQL instance (resolvable only inside the VPC)."
+  value       = aws_db_instance.mysql.address
+}
+
+output "rds_master_secret_arn" {
+  value = aws_db_instance.mysql.master_user_secret[0].secret_arn
+}
+
+output "db_app_secret_name" {
+  value = aws_secretsmanager_secret.db_app.name
+}
+
 output "ecr_repository_url" {
   description = "Push/pull URL of the app image repository."
   value       = aws_ecr_repository.app.repository_url

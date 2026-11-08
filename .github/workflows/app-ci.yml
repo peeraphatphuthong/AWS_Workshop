@@ -74,6 +74,8 @@ jobs:
           done
           curl -fsS http://127.0.0.1:3000/api/status | tee status.json
           grep -q '"gitSha":"${{ github.sha }}"' status.json
+          # The app runs as "node": it must be able to read the RDS CA bundle (regression test for EACCES).
+          docker exec smoke head -c 27 /app/certs/rds-global-bundle.pem | grep -q 'BEGIN CERTIFICATE'
           docker rm -f smoke
 
       - name: Trivy — report all HIGH/CRITICAL (including unfixed)

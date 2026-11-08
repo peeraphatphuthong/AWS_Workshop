@@ -66,6 +66,18 @@ variable "initial_image_tag" {
   }
 }
 
+variable "db_instance_class" {
+  description = "RDS instance class. db.t4g.micro (Graviton) is the cheapest option for MySQL 8.4."
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "db_app_password_version" {
+  description = "Increment to generate and store a new application DB password (rotation)."
+  type        = number
+  default     = 1
+}
+
 variable "web_ingress" {
   description = "Inbound rules for the web tier security group."
   type = list(object({

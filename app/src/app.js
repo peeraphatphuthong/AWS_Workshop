@@ -11,7 +11,8 @@ export function createApp(config) {
   app.set('trust proxy', 'loopback, uniquelocal');
 
   async function collectStatus() {
-    const [ec2, ebs, db] = await Promise.all([checkEc2(config), checkEbs(config), checkDb(config)]);
+    const ec2 = await checkEc2(config);
+    const [ebs, db] = await Promise.all([checkEbs(config), checkDb(config, ec2.instanceId ?? 'local')]);
     return {
       app: {
         version: config.appVersion,
@@ -31,7 +32,7 @@ export function createApp(config) {
 
   // Readiness: can this instance serve real traffic right now?
   app.get('/readyz', async (_req, res) => {
-    const [ebs, db] = await Promise.all([checkEbs(config), checkDb(config)]);
+    const [ebs, db] = await Promise.all([checkEbs(config), checkDb(config, 'readyz', { write: false })]);
     const dbOk = !isDbConfigured(config.db) || db.status === 'ok';
     const ready = ebs.status === 'ok' && dbOk;
     res.status(ready ? 200 : 503).json({ ready, ebs: ebs.status, db: db.status });

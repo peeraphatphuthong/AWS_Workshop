@@ -1,10 +1,15 @@
 terraform {
-  required_version = ">= 1.10.0"
+  # >= 1.11 for write-only arguments (secret_string_wo) used in database.tf.
+  required_version = ">= 1.11.0"
 
   required_providers {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 6.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.7"
     }
   }
 
