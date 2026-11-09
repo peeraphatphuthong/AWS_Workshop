@@ -4,8 +4,8 @@
 # Alert on symptoms users feel (site down, 5xx) and on causes we know will hurt (connection
 # exhaustion, storage, CPU credits). 10 alarms = exactly the CloudWatch free tier.
 #
-# treat_missing_data = "notBreaching": when the scheduler stops EC2/RDS at night their metrics
-# simply stop. That is expected, not an outage, so missing data must not page anyone.
+# treat_missing_data = "notBreaching": at night the ASG scales to 0 and RDS is stopped, so their
+# metrics simply stop. That is expected, not an outage, so missing data must not page anyone.
 # ------------------------------------------------------------------------------------------
 
 # Topic + email subscription live in the bootstrap stack (keeps the email out of this public repo/CI).
@@ -20,10 +20,10 @@ locals {
   metric_alarms = {
     # ---------------------------------------------------------------- EC2
     "ec2-cpu-high" = {
-      description = "Web host CPU > 80% for 15 minutes."
+      description = "Web tier average CPU > 80% for 15 minutes (target tracking should already be scaling out)."
       namespace   = "AWS/EC2"
       metric      = "CPUUtilization"
-      dimensions  = { InstanceId = var.instance_id }
+      dimensions  = { AutoScalingGroupName = var.asg_name }
       statistic   = "Average"
       period      = 300
       periods     = 3
@@ -33,15 +33,29 @@ locals {
     "ec2-cpu-surplus-high" = {
       # Unlimited mode: surplus credits = CPU used above baseline that wasn't earned yet. Boot spends
       # a few; > 60 (one vCPU flat out for an hour) means sustained load that will show up on the bill.
-      description = "Web host spent > 60 surplus CPU credits (unlimited mode, billed at $0.05/vCPU-hour if not earned back)."
+      description = "Web instances spent > 60 surplus CPU credits (unlimited mode, billed at $0.05/vCPU-hour if not earned back)."
       namespace   = "AWS/EC2"
       metric      = "CPUSurplusCreditBalance"
-      dimensions  = { InstanceId = var.instance_id }
+      dimensions  = { AutoScalingGroupName = var.asg_name }
       statistic   = "Maximum"
       period      = 300
       periods     = 1
       operator    = "GreaterThanThreshold"
       threshold   = 60
+    }
+    # ---------------------------------------------------------------- ALB (Phase 8.3)
+    "alb-unhealthy-hosts" = {
+      # Replaces EC2 auto-recover: the ASG already replaces failed instances by itself; this tells
+      # a human when it happens (or keeps happening — e.g. a bad AMI/user_data in a refresh).
+      description = "At least one instance behind the ALB failed its health check for 3 minutes."
+      namespace   = "AWS/ApplicationELB"
+      metric      = "UnHealthyHostCount"
+      dimensions  = { LoadBalancer = var.alb_arn_suffix, TargetGroup = var.target_group_arn_suffix }
+      statistic   = "Maximum"
+      period      = 60
+      periods     = 3
+      operator    = "GreaterThanThreshold"
+      threshold   = 0
     }
     # ---------------------------------------------------------------- RDS
     "rds-cpu-high" = {
@@ -147,38 +161,25 @@ resource "aws_cloudwatch_metric_alarm" "this" {
   ok_actions    = local.alarm_actions # "resolved" email too, so you know when it's over
 }
 
-# Hardware/host failure on AWS's side: EC2 auto-recovery moves the instance to healthy hardware.
-# Same instance ID, private IP, EIP and EBS volumes — no Terraform change needed.
-resource "aws_cloudwatch_metric_alarm" "ec2_auto_recover" {
-  alarm_name          = "${local.name_prefix}-ec2-system-check-failed"
-  alarm_description   = "AWS system status check failed -> auto-recover the web host onto new hardware."
-  namespace           = "AWS/EC2"
-  metric_name         = "StatusCheckFailed_System"
-  dimensions          = { InstanceId = var.instance_id }
-  statistic           = "Maximum"
-  period              = 60
-  evaluation_periods  = 2
-  comparison_operator = "GreaterThanOrEqualToThreshold"
-  threshold           = 1
-  treat_missing_data  = "notBreaching"
-
-  alarm_actions = concat(["arn:aws:automate:${var.aws_region}:ec2:recover"], local.alarm_actions)
-  ok_actions    = local.alarm_actions
-}
-
 # ------------------------------------------------------------------------------------------
 # Dashboard (first 3 dashboards are free): one page to look at during an incident.
 # ------------------------------------------------------------------------------------------
 locals {
-  ec2_dim = ["InstanceId", var.instance_id]
+  asg_dim = ["AutoScalingGroupName", var.asg_name]
+  alb_dim = ["LoadBalancer", var.alb_arn_suffix]
+  tg_dim  = ["TargetGroup", var.target_group_arn_suffix, "LoadBalancer", var.alb_arn_suffix]
   rds_dim = ["DBInstanceIdentifier", var.db_identifier]
 
   dashboard_widgets = [
     { title = "Health check (1 = OK)", metrics = [[local.metric_namespace, "HealthCheckOk", { stat = "Minimum" }]] },
     { title = "Health check latency (ms)", metrics = [[local.metric_namespace, "HealthCheckLatencyMs", { stat = "Average" }]] },
     { title = "Nginx 5xx", metrics = [[local.metric_namespace, "Nginx5xx", { stat = "Sum" }]] },
-    { title = "EC2 CPU %", metrics = [concat(["AWS/EC2", "CPUUtilization"], local.ec2_dim)] },
-    { title = "EC2 CPU credit balance", metrics = [concat(["AWS/EC2", "CPUCreditBalance"], local.ec2_dim)] },
+    { title = "ALB requests", metrics = [concat(["AWS/ApplicationELB", "RequestCount"], local.alb_dim, [{ stat = "Sum" }])] },
+    { title = "ALB target response time (s)", metrics = [concat(["AWS/ApplicationELB", "TargetResponseTime"], local.alb_dim, [{ stat = "p95" }])] },
+    { title = "Healthy / unhealthy targets", metrics = [concat(["AWS/ApplicationELB", "HealthyHostCount"], local.tg_dim, [{ stat = "Minimum" }]), concat(["AWS/ApplicationELB", "UnHealthyHostCount"], local.tg_dim, [{ stat = "Maximum" }])] },
+    { title = "ASG instances in service", metrics = [concat(["AWS/AutoScaling", "GroupInServiceInstances"], local.asg_dim, [{ stat = "Maximum" }])] },
+    { title = "Web CPU % (ASG average)", metrics = [concat(["AWS/EC2", "CPUUtilization"], local.asg_dim)] },
+    { title = "Web CPU surplus credits", metrics = [concat(["AWS/EC2", "CPUSurplusCreditBalance"], local.asg_dim, [{ stat = "Maximum" }])] },
     { title = "RDS connections", metrics = [concat(["AWS/RDS", "DatabaseConnections"], local.rds_dim, [{ stat = "Maximum" }])] },
     { title = "RDS CPU %", metrics = [concat(["AWS/RDS", "CPUUtilization"], local.rds_dim)] },
     { title = "RDS freeable memory", metrics = [concat(["AWS/RDS", "FreeableMemory"], local.rds_dim)] },

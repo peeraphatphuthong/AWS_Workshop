@@ -149,9 +149,10 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Continuous deployment to dev:
-  #   record current tag -> set desired tag in Parameter Store -> SSM Run Command deploy-app on the
-  #   web host -> smoke test through the public URL -> on any failure, roll back to the previous tag.
+  # Continuous deployment to dev (Phase 8.3: Auto Scaling group behind an ALB):
+  #   record current tag -> set desired tag in Parameter Store -> SSM Run Command deploy-app on EVERY
+  #   instance of the ASG, one at a time -> smoke test through the ALB -> on failure, roll back.
+  #   Instances launched later (scale-out, refresh, morning start) read the tag at boot.
   deploy:
     needs: push
     runs-on: ubuntu-latest
@@ -160,7 +161,8 @@ jobs:
       url: ${{ steps.target.outputs.url }}
     env:
       TAG_PARAM: /retail-health/dev/app/image-tag
-      WEB_NAME_TAG: aws-workshop-dev-web
+      ASG_NAME: aws-workshop-dev-web
+      ALB_NAME: aws-workshop-dev-alb
       NEW_TAG: ${{ github.sha }}
     steps:
       - uses: aws-actions/configure-aws-credentials@v5
@@ -169,76 +171,87 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Resolve target instance and URL
+      - name: Resolve targets and URL
         id: target
         run: |
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=$WEB_NAME_TAG" "Name=instance-state-name,Values=running" \
-            --query 'Reservations[].Instances[].InstanceId' --output text)
-          [ -n "$INSTANCE_ID" ] || { echo "::error::no running instance tagged $WEB_NAME_TAG"; exit 1; }
-          EIP=$(aws ec2 describe-addresses --filters "Name=instance-id,Values=$INSTANCE_ID" \
-            --query 'Addresses[0].PublicIp' --output text)
-          echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
-          echo "url=http://$EIP" >> "$GITHUB_OUTPUT"
+          IDS=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$ASG_NAME" \
+            --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' --output text)
+          DNS=$(aws elbv2 describe-load-balancers --names "$ALB_NAME" --query 'LoadBalancers[0].DNSName' --output text)
           PREV=$(aws ssm get-parameter --name "$TAG_PARAM" --query Parameter.Value --output text)
+          echo "instance_ids=$IDS" >> "$GITHUB_OUTPUT"
+          echo "url=http://$DNS" >> "$GITHUB_OUTPUT"
           echo "previous_tag=$PREV" >> "$GITHUB_OUTPUT"
-          echo "Deploying ${NEW_TAG::7} to $INSTANCE_ID (previous ${PREV::7})"
+          echo "Deploying ${NEW_TAG::7} to [${IDS:-none}] behind $DNS (previous ${PREV::7})"
 
       - name: Set desired version
         run: aws ssm put-parameter --name "$TAG_PARAM" --value "$NEW_TAG" --overwrite > /dev/null
 
-      - name: Run deploy-app via SSM
+      - name: Nothing running (night schedule) - version is set for the next boot
+        if: steps.target.outputs.instance_ids == ''
+        run: |
+          echo "::notice::ASG $ASG_NAME has no InService instances (scaled to 0). ${NEW_TAG::7} is the desired version; instances will run it when they start."
+          echo "### Desired version set to \`${NEW_TAG::7}\` (no instances running) ⏸" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run deploy-app via SSM (one instance at a time)
+        if: steps.target.outputs.instance_ids != ''
         env:
-          INSTANCE_ID: ${{ steps.target.outputs.instance_id }}
+          IDS: ${{ steps.target.outputs.instance_ids }}
         run: |
           set -euo pipefail
-          run_deploy() {
-            local cmd status
-            cmd=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
+          for id in $IDS; do
+            cmd=$(aws ssm send-command --instance-ids "$id" \
               --document-name AWS-RunShellScript \
-              --comment "deploy $1 by ${GITHUB_ACTOR} run ${GITHUB_RUN_ID}" \
+              --comment "deploy ${NEW_TAG::7} by ${GITHUB_ACTOR} run ${GITHUB_RUN_ID}" \
               --parameters 'commands=["/usr/local/bin/deploy-app"]' \
               --timeout-seconds 600 --query Command.CommandId --output text)
+            status=Pending
             for _ in $(seq 1 60); do
-              status=$(aws ssm get-command-invocation --command-id "$cmd" --instance-id "$INSTANCE_ID" \
+              status=$(aws ssm get-command-invocation --command-id "$cmd" --instance-id "$id" \
                 --query Status --output text 2>/dev/null || echo Pending)
               case "$status" in Success|Failed|Cancelled|TimedOut) break ;; esac
               sleep 5
             done
-            aws ssm get-command-invocation --command-id "$cmd" --instance-id "$INSTANCE_ID" \
-              --query StandardOutputContent --output text | tail -n 15
-            echo "SSM status: $status"
-            [ "$status" = "Success" ]
-          }
-          run_deploy "${NEW_TAG::7}"
+            aws ssm get-command-invocation --command-id "$cmd" --instance-id "$id" \
+              --query StandardOutputContent --output text | tail -n 5
+            echo "$id: $status"
+            if [ "$status" != "Success" ]; then exit 1; fi
+          done
 
-      - name: Smoke test through the public URL
+      - name: Smoke test through the load balancer
+        if: steps.target.outputs.instance_ids != ''
         env:
           URL: ${{ steps.target.outputs.url }}
+          IDS: ${{ steps.target.outputs.instance_ids }}
         run: |
-          for _ in $(seq 1 12); do
-            if curl -fsS "$URL/api/status" -o status.json; then break; fi
-            sleep 5
+          # Several requests: with 2+ instances the ALB spreads them, so every instance gets checked.
+          n=$(( $(echo $IDS | wc -w) * 3 ))
+          for i in $(seq 1 "$n"); do
+            ok=false
+            for _ in $(seq 1 12); do
+              if curl -fsS "$URL/api/status" -o status.json; then ok=true; break; fi
+              sleep 5
+            done
+            $ok || { echo "::error::$URL not reachable"; exit 1; }
+            jq -c '{sha: .app.gitSha[0:7], instance: .ec2.instanceId, db: .db.status}' status.json
+            jq -e --arg sha "$NEW_TAG" '.app.gitSha == $sha' status.json > /dev/null \
+              || { echo "::error::an instance is not running $NEW_TAG"; exit 1; }
+            jq -e '.db.status == "ok"' status.json > /dev/null \
+              || { echo "::error::database check failed after deploy"; exit 1; }
           done
-          cat status.json; echo
-          jq -e --arg sha "$NEW_TAG" '.app.gitSha == $sha' status.json > /dev/null \
-            || { echo "::error::live version is not $NEW_TAG"; exit 1; }
-          jq -e '.db.status == "ok" and .ebs.status == "ok"' status.json > /dev/null \
-            || { echo "::error::dependency check failed after deploy"; exit 1; }
           echo "### Deployed \`${NEW_TAG::7}\` to $URL ✅" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Roll back to previous version
         if: failure() && steps.target.outputs.previous_tag != ''
         env:
-          INSTANCE_ID: ${{ steps.target.outputs.instance_id }}
+          IDS: ${{ steps.target.outputs.instance_ids }}
           PREV: ${{ steps.target.outputs.previous_tag }}
         run: |
           echo "::warning::Deploy failed - rolling back to ${PREV::7}"
           aws ssm put-parameter --name "$TAG_PARAM" --value "$PREV" --overwrite > /dev/null
-          cmd=$(aws ssm send-command --instance-ids "$INSTANCE_ID" --document-name AWS-RunShellScript \
-            --comment "rollback to ${PREV::7}" --parameters 'commands=["/usr/local/bin/deploy-app"]' \
-            --query Command.CommandId --output text)
-          sleep 60
-          aws ssm get-command-invocation --command-id "$cmd" --instance-id "$INSTANCE_ID" \
-            --query '[Status,StandardOutputContent]' --output text | tail -n 5
+          if [ -n "$IDS" ]; then
+            # shellcheck disable=SC2086 # one argument per instance ID
+            aws ssm send-command --instance-ids $IDS --document-name AWS-RunShellScript \
+              --comment "rollback to ${PREV::7}" --parameters 'commands=["/usr/local/bin/deploy-app"]' \
+              --query Command.CommandId --output text
+          fi
           echo "### ❌ Deploy of \`${NEW_TAG::7}\` failed - rolled back to \`${PREV::7}\`" >> "$GITHUB_STEP_SUMMARY"

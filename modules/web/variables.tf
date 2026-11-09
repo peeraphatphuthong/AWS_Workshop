@@ -17,13 +17,26 @@ variable "aws_region" {
   type = string
 }
 
-variable "subnet" {
-  description = "Public subnet for the host: { id, az, cidr }. The EBS volume is created in the same AZ."
-  type = object({
+variable "vpc_id" {
+  type = string
+}
+
+variable "subnets" {
+  description = "Public subnets for the ALB and the ASG: name => { id, az, cidr }. Use >= 2 AZs."
+  type = map(object({
     id   = string
     az   = string
     cidr = string
-  })
+  }))
+
+  validation {
+    condition     = length(var.subnets) >= 2
+    error_message = "An ALB needs subnets in at least two Availability Zones."
+  }
+}
+
+variable "alb_security_group_id" {
+  type = string
 }
 
 variable "security_group_id" {
@@ -36,10 +49,22 @@ variable "instance_type" {
   default     = "t3.micro"
 }
 
-variable "data_volume_size_gb" {
-  description = "Size of the EBS data volume mounted at /mnt/app-data."
+variable "min_size" {
+  description = "Minimum instances during office hours (the night schedule scales to 0)."
   type        = number
-  default     = 10
+  default     = 1
+}
+
+variable "max_size" {
+  description = "Maximum instances the CPU target-tracking policy may scale out to."
+  type        = number
+  default     = 2
+}
+
+variable "cpu_target_percent" {
+  description = "Average CPU the ASG tries to keep (target tracking)."
+  type        = number
+  default     = 60
 }
 
 variable "initial_image_tag" {
