@@ -4,7 +4,7 @@ A hands-on, production-style project for learning **AWS** and **Terraform** end 
 infrastructure as code, GitOps-style CI/CD with GitHub Actions, a containerized web app,
 a managed database, monitoring, and cost control (FinOps).
 
-> Status: **Phase 8 — Level up (in progress)**: Terraform modules, per-environment roots (`envs/dev` applied, `envs/prod` plan-only), ALB + Auto Scaling Group, ECS Fargate comparison on the same ALB (port 8080) on top of Phase 7 observability & FinOps (`terraform -chdir=envs/dev output web_url`) (see [docs/ROADMAP.md](docs/ROADMAP.md))
+> Status: **Phase 8 — Level up (done)**: Terraform modules, per-environment roots (`envs/dev` applied, `envs/prod` plan-only), ALB + Auto Scaling Group, ECS Fargate comparison on the same ALB (port 8080) on top of Phase 7 observability & FinOps (`terraform -chdir=envs/dev output web_url`) (see [docs/ROADMAP.md](docs/ROADMAP.md))
 
 ## Target architecture
 
