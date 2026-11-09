@@ -7,7 +7,7 @@ Phase 8 is split into small PRs. Each one is shippable on its own.
 | 8.1 | Refactor the flat `infra/` stack into modules with `moved` blocks (zero-change plan) | $0 | ✅ |
 | 8.2 | Multi-environment layout (dev applied, prod plan-only) | $0 | ✅ |
 | 8.3 | ALB + Auto Scaling Group (stateless web tier) | ~+$0.57/day | ✅ |
-| 8.4 | ECS Fargate comparison (same ALB :8080, Fargate Spot) | ~+$0.13/day | 🚧 |
+| 8.4 | ECS Fargate comparison (same ALB :8080, Fargate Spot) | ~+$0.13/day | ✅ |
 
 ## 8.1 Modules
 
@@ -265,6 +265,18 @@ Listener, target group, cluster, task definitions: no charge. Logs: a few MB at 
 Rule of thumb: Fargate costs more per vCPU than EC2, but you pay only for what each task reserves, with no idle
 instance headroom, OS patching or AMI pipeline. Small or spiky services usually win on Fargate; large steady fleets
 on EC2 (or ECS on EC2 with Savings Plans).
+
+### Verified after apply (2026-11-09)
+- Bootstrap applied first (ECS service-linked role + `ecs:*` for CI); infra apply: 19 added, 2 changed, 0 destroyed,
+  no IAM propagation error this time.
+- The first task ran the image the plan had captured (`964da0b`, before the `VOLUME` change): `/healthz` 200,
+  DB `ok` through the injected secret, but `/readyz` 503 with `EACCES: permission denied, open '/data/health.log'`
+  (the ephemeral volume is root-owned without a `VOLUME` declaration). Not an outage: the ALB checks liveness.
+- Pipeline deploy (app-ci re-run): EC2 first, then Fargate revision `:1` -> `:2` with `7bbf422`, rollout
+  `COMPLETED`, smoke test on `:8080` passed. `/readyz` -> `{"ready":true,"ebs":"ok","db":"ok"}`; `/data` is the
+  task's 20 GiB ephemeral storage, owned by `node` thanks to `VOLUME ["/data"]`.
+- Drift check after the pipeline deploy: **No changes** — `track_latest` + the shared SSM tag work as intended.
+- Schedules `stop-fargate` (22:00, desired 0) and `start-fargate` (08:00, desired 1) target the service.
 
 ### Interview Q&A (8.4)
 - **Q: ECS task execution role vs task role?**
