@@ -84,7 +84,7 @@ output "ecr_repository_url" {
 
 output "dashboard_url" {
   description = "CloudWatch dashboard for this environment."
-  value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards/dashboard/${module.observability.dashboard_name}"
+  value       = "https://${local.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${local.aws_region}#dashboards/dashboard/${module.observability.dashboard_name}"
 }
 
 output "container_log_group" {
@@ -97,5 +97,5 @@ output "alarm_names" {
 
 output "office_hours" {
   description = "When EC2/RDS are running (EventBridge Scheduler)."
-  value       = var.office_hours.enabled ? "${var.office_hours.timezone}: RDS ${var.office_hours.start_db} -> web ${var.office_hours.start_web}; stop web ${var.office_hours.stop_web} -> RDS ${var.office_hours.stop_db}" : "disabled (always on)"
+  value       = local.office_hours.enabled ? "${local.office_hours.timezone}: RDS ${local.office_hours.start_db} -> web ${local.office_hours.start_web}; stop web ${local.office_hours.stop_web} -> RDS ${local.office_hours.stop_db}" : "disabled (always on)"
 }

@@ -3,11 +3,12 @@ name: terraform-ci
 # Pull-request checks for infrastructure code:
 #   static   : fmt, validate, tflint            (no AWS access)
 #   security : Trivy IaC misconfiguration scan  (no AWS access)
-#   plan     : real `terraform plan` with the READ-ONLY CI user, posted as a PR comment
+#   plan     : real `terraform plan` per environment (dev, prod) with the READ-ONLY CI user,
+#              each posted as its own PR comment. prod is plan-only in this workshop.
 on:
   pull_request:
     paths:
-      - "infra/**"
+      - "envs/**"
       - "modules/**"
       - "bootstrap/**"
       - "app/docker-compose.yml" # embedded in EC2 user_data
@@ -34,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        stack: [bootstrap, infra]
+        stack: [bootstrap, envs/dev, envs/prod]
     defaults:
       run:
         working-directory: ${{ matrix.stack }}
@@ -49,8 +50,8 @@ jobs:
         run: terraform fmt -check -recursive -diff
 
       - name: terraform fmt (modules)
-        if: matrix.stack == 'infra'
-        run: terraform fmt -check -recursive -diff ../modules
+        if: matrix.stack == 'envs/dev'
+        run: terraform fmt -check -recursive -diff ../../modules
 
       - name: terraform init (no backend)
         run: terraform init -backend=false -input=false
@@ -85,13 +86,17 @@ jobs:
   plan:
     needs: static
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [dev, prod]
     environment: aws-plan # read-only IAM user
     permissions:
       contents: read
       pull-requests: write # to post the plan comment
     defaults:
       run:
-        working-directory: infra
+        working-directory: envs/${{ matrix.env }}
     steps:
       - uses: actions/checkout@v5
 
@@ -129,19 +134,23 @@ jobs:
         uses: actions/github-script@v7
         env:
           EXITCODE: ${{ steps.plan.outputs.exitcode }}
+          TF_ENV: ${{ matrix.env }}
         with:
           script: |
             const fs = require('fs');
-            const read = (f) => (fs.existsSync(`infra/${f}`) ? fs.readFileSync(`infra/${f}`, 'utf8') : '');
+            const envName = process.env.TF_ENV;
+            const dir = `envs/${envName}`;
+            const read = (f) => (fs.existsSync(`${dir}/${f}`) ? fs.readFileSync(`${dir}/${f}`, 'utf8') : '');
             const code = process.env.EXITCODE;
             const status = code === '0' ? '✅ No changes' : code === '2' ? '📝 Changes' : '❌ Plan failed';
             const max = 60000;
             let full = read('plan.txt') || read('plan.log');
             if (full.length > max) full = full.slice(0, max) + '\n... (truncated, see workflow logs)';
-            const marker = '<!-- terraform-plan:infra -->';
+            const marker = `<!-- terraform-plan:${envName} -->`;
             const body = [
               marker,
-              `### Terraform plan — \`infra\` — ${status}`,
+              `### Terraform plan — \`${dir}\` — ${status}`,
+              envName === 'prod' ? '_prod is plan-only in this workshop (shows what production would need); nothing applies it._' : '',
               read('summary.txt').trim() ? `**${read('summary.txt').trim()}**` : '',
               read('changes.txt').trim() ? '```\n' + read('changes.txt').trim() + '\n```' : '',
               '<details><summary>Full plan</summary>\n\n```hcl\n' + full + '\n```\n</details>',
