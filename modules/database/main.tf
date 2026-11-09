@@ -6,7 +6,7 @@
 resource "aws_db_subnet_group" "main" {
   name        = "${local.name_prefix}-db"
   description = "Private subnets for RDS (must span >= 2 AZs)"
-  subnet_ids  = [for k, _ in local.private_subnets : aws_subnet.this[k].id]
+  subnet_ids  = var.subnet_ids
 
   tags = { Name = "${local.name_prefix}-db-subnets" }
 }
@@ -22,7 +22,7 @@ resource "aws_db_parameter_group" "mysql" {
     value = "1"
   }
 
-  # Log queries slower than 1s (exported to CloudWatch Logs, see logs.tf).
+  # Log queries slower than 1s (exported to CloudWatch Logs, see logs.tf in this module).
   parameter {
     name  = "slow_query_log"
     value = "1"
@@ -43,7 +43,7 @@ resource "aws_db_instance" "mysql" {
   engine         = "mysql"
   engine_version = "8.4" # major only -> RDS picks the default minor; auto_minor_version_upgrade keeps it patched
 
-  instance_class        = var.db_instance_class
+  instance_class        = var.instance_class
   allocated_storage     = 20
   max_allocated_storage = 0 # storage autoscaling off (lab)
   storage_type          = "gp3"
@@ -56,7 +56,7 @@ resource "aws_db_instance" "mysql" {
   manage_master_user_password = true
 
   db_subnet_group_name   = aws_db_subnet_group.main.name
-  vpc_security_group_ids = [aws_security_group.db.id]
+  vpc_security_group_ids = [var.security_group_id]
   parameter_group_name   = aws_db_parameter_group.mysql.name
   publicly_accessible    = false
   multi_az               = false # Multi-AZ doubles the price; for prod this would be true
@@ -85,7 +85,7 @@ resource "aws_db_instance" "mysql" {
 #
 # `ephemeral` random_password + `secret_string_wo` (write-only): the generated password is sent
 # to Secrets Manager but is NEVER stored in Terraform state or plan files.
-# Rotate: bump var.db_app_password_version -> apply -> instance runs db-bootstrap (ALTER USER).
+# Rotate: bump var.app_password_version -> apply -> instance runs db-bootstrap (ALTER USER).
 # ------------------------------------------------------------------------------------------
 ephemeral "random_password" "db_app" {
   length  = 32
@@ -107,5 +107,5 @@ resource "aws_secretsmanager_secret_version" "db_app" {
     port     = aws_db_instance.mysql.port
     dbname   = aws_db_instance.mysql.db_name
   })
-  secret_string_wo_version = var.db_app_password_version
+  secret_string_wo_version = var.app_password_version
 }

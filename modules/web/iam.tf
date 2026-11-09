@@ -48,8 +48,8 @@ data "aws_iam_policy_document" "web_db_secrets" {
   statement {
     actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
     resources = [
-      aws_secretsmanager_secret.db_app.arn,
-      aws_db_instance.mysql.master_user_secret[0].secret_arn,
+      var.db_app_secret_arn,
+      var.db_master_secret_arn,
     ]
   }
 }

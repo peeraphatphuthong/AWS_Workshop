@@ -29,7 +29,8 @@ AWS (ap-southeast-2, Sydney)
 ```
 .
 ├── bootstrap/        # Phase 1: budget, state bucket, CI identity (run locally by an admin)
-├── infra/            # Phase 2+: main Terraform stack (remote state in S3)
+├── infra/            # Phase 2+: root of the dev stack (remote state in S3): wiring + moved blocks
+├── modules/          # Phase 8: network, database, web, observability
 ├── app/              # Phase 3: Node.js app, Dockerfile, NGINX config
 ├── scripts/          # FinOps / ops helper scripts
 ├── docs/             # Roadmap + per-phase notes and interview Q&A
