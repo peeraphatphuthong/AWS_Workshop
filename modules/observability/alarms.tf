@@ -185,6 +185,16 @@ locals {
     { title = "RDS freeable memory", metrics = [concat(["AWS/RDS", "FreeableMemory"], local.rds_dim)] },
     { title = "RDS read/write latency (s)", metrics = [concat(["AWS/RDS", "ReadLatency"], local.rds_dim), concat(["AWS/RDS", "WriteLatency"], local.rds_dim)] },
   ]
+
+  # Phase 8.4: side-by-side comparison widgets (free AWS/ECS service metrics, no Container Insights).
+  # flatten(for ...) instead of `cond ? [] : [...]`: the two branches would be tuples of different types.
+  fargate_widgets = flatten([for f in(var.fargate == null ? [] : [var.fargate]) : [
+    { title = "Fargate task CPU / memory %", metrics = [["AWS/ECS", "CPUUtilization", "ClusterName", f.cluster_name, "ServiceName", f.service_name], ["AWS/ECS", "MemoryUtilization", "ClusterName", f.cluster_name, "ServiceName", f.service_name]] },
+    { title = "p95 response time (s): EC2 vs Fargate", metrics = [concat(["AWS/ApplicationELB", "TargetResponseTime"], local.tg_dim, [{ stat = "p95", label = "EC2 (nginx -> app)" }]), ["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", var.alb_arn_suffix, "TargetGroup", f.target_group_arn_suffix, { stat = "p95", label = "Fargate (app)" }]] },
+    { title = "Healthy targets: EC2 vs Fargate", metrics = [concat(["AWS/ApplicationELB", "HealthyHostCount"], local.tg_dim, [{ stat = "Minimum", label = "EC2" }]), ["AWS/ApplicationELB", "HealthyHostCount", "LoadBalancer", var.alb_arn_suffix, "TargetGroup", f.target_group_arn_suffix, { stat = "Minimum", label = "Fargate" }]] },
+  ]])
+
+  all_dashboard_widgets = concat(local.dashboard_widgets, local.fargate_widgets)
 }
 
 resource "aws_cloudwatch_dashboard" "main" {
@@ -192,7 +202,7 @@ resource "aws_cloudwatch_dashboard" "main" {
   dashboard_body = jsonencode({
     widgets = concat(
       [
-        for i, w in local.dashboard_widgets : {
+        for i, w in local.all_dashboard_widgets : {
           type   = "metric"
           x      = (i % 3) * 8
           y      = floor(i / 3) * 6
@@ -212,7 +222,7 @@ resource "aws_cloudwatch_dashboard" "main" {
         {
           type   = "log"
           x      = 0
-          y      = ceil(length(local.dashboard_widgets) / 3) * 6
+          y      = ceil(length(local.all_dashboard_widgets) / 3) * 6
           width  = 24
           height = 6
           properties = {

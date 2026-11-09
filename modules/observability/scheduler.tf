@@ -38,7 +38,8 @@ resource "aws_iam_role" "scheduler" {
   assume_role_policy = data.aws_iam_policy_document.scheduler_assume.json
 }
 
-# Least privilege: only resize THIS Auto Scaling group, start/stop THIS database, invoke THIS function.
+# Least privilege: only resize THIS Auto Scaling group (and Fargate service), start/stop THIS database,
+# invoke THIS function.
 data "aws_iam_policy_document" "scheduler" {
   statement {
     sid       = "ResizeWebTier"
@@ -50,6 +51,15 @@ data "aws_iam_policy_document" "scheduler" {
     sid       = "StartStopDatabase"
     actions   = ["rds:StartDBInstance", "rds:StopDBInstance"]
     resources = [var.db_arn]
+  }
+
+  dynamic "statement" {
+    for_each = var.fargate == null ? [] : [var.fargate]
+    content {
+      sid       = "ResizeFargateService"
+      actions   = ["ecs:UpdateService"]
+      resources = [statement.value.service_arn]
+    }
   }
 
   statement {
@@ -66,7 +76,21 @@ resource "aws_iam_role_policy" "scheduler" {
 }
 
 locals {
-  office_hours_schedules = {
+  # Phase 8.4: same idea for the Fargate service: desired count 0 at night (no tasks = no charge).
+  fargate_schedules = var.fargate == null ? {} : {
+    "start-fargate" = {
+      cron   = var.office_hours.start_web
+      target = "arn:aws:scheduler:::aws-sdk:ecs:updateService"
+      input  = { Cluster = var.fargate.cluster_name, Service = var.fargate.service_name, DesiredCount = var.fargate.desired_count }
+    }
+    "stop-fargate" = {
+      cron   = var.office_hours.stop_web
+      target = "arn:aws:scheduler:::aws-sdk:ecs:updateService"
+      input  = { Cluster = var.fargate.cluster_name, Service = var.fargate.service_name, DesiredCount = 0 }
+    }
+  }
+
+  office_hours_schedules = merge(local.fargate_schedules, {
     "start-db" = {
       cron   = var.office_hours.start_db
       target = "arn:aws:scheduler:::aws-sdk:rds:startDBInstance"
@@ -89,7 +113,7 @@ locals {
       target = "arn:aws:scheduler:::aws-sdk:rds:stopDBInstance"
       input  = { DbInstanceIdentifier = var.db_identifier }
     }
-  }
+  })
 }
 
 resource "aws_scheduler_schedule" "office_hours" {

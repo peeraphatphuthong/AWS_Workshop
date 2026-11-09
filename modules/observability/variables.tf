@@ -88,3 +88,15 @@ variable "health_check_rate" {
   type        = string
   default     = "rate(5 minutes)"
 }
+
+variable "fargate" {
+  description = "Phase 8.4 Fargate comparison service (null = not deployed): night schedules + dashboard widgets."
+  type = object({
+    cluster_name            = string
+    service_name            = string
+    service_arn             = string
+    desired_count           = number
+    target_group_arn_suffix = string
+  })
+  default = null
+}

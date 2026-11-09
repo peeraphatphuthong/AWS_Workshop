@@ -15,10 +15,11 @@ misconfigurations:
   - id: AWS-0104
     paths:
       - "modules/network/security_groups.tf"
+      - "modules/fargate/network.tf"
     statement: >-
-      Web host egress on 80/443 to 0.0.0.0/0 is required: it reaches ECR, SSM, Secrets Manager, OS
+      Web host / Fargate task egress on 80/443 to 0.0.0.0/0 is required: it reaches ECR, SSM, Secrets Manager, OS
       package mirrors, Docker Hub and GitHub without NAT/VPC endpoints. Only 80/443 are open (plus 3306
-      to the DB SG). Production alternative: interface VPC endpoints (~$7/month each) + S3 gateway
+      to the DB SG; Fargate tasks: 443 only). Production alternative: interface VPC endpoints (~$7/month each) + S3 gateway
       endpoint + an egress proxy / Network Firewall allow-list.
     expired_at: 2027-05-08
 
@@ -43,8 +44,9 @@ misconfigurations:
   - id: AWS-0054
     paths:
       - "modules/web/compute.tf"
+      - "modules/fargate/network.tf"
     statement: >-
-      HTTP-only listener because the sandbox has no domain to issue an ACM certificate for. The app serves
+      HTTP-only listeners (port 80 EC2, port 8080 Fargate comparison) because the sandbox has no domain to issue an ACM certificate for. The app serves
       no credentials or personal data. Production requires an HTTPS listener (ACM cert, TLS 1.2+ policy)
       with an HTTP->HTTPS redirect. Short expiry: CRITICAL finding, re-review in 3 months.
     expired_at: 2027-02-09

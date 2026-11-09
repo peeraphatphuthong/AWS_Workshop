@@ -36,6 +36,11 @@ ENV NODE_ENV=production \
     APP_VERSION=${APP_VERSION} \
     GIT_SHA=${GIT_SHA}
 
+# Declared as a volume: Docker and ECS Fargate copy the image's /data (owned by "node") into a fresh
+# volume, so the non-root app can write there even with a read-only root filesystem (Phase 8.4).
+# On EC2, docker-compose bind-mounts a host directory over it, as before.
+VOLUME ["/data"]
+
 # Never run as root inside the container.
 USER node
 EXPOSE 3000

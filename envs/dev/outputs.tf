@@ -84,6 +84,15 @@ output "alarm_names" {
 }
 
 output "office_hours" {
-  description = "When EC2/RDS are running (EventBridge Scheduler)."
+  description = "When the web tier (EC2 + Fargate) and RDS are running (EventBridge Scheduler)."
   value       = local.office_hours.enabled ? "${local.office_hours.timezone}: RDS ${local.office_hours.start_db} -> web ${local.office_hours.start_web}; stop web ${local.office_hours.stop_web} -> RDS ${local.office_hours.stop_db}" : "disabled (always on)"
+}
+
+output "fargate_url" {
+  description = "Phase 8.4: the same app on ECS Fargate (same ALB, port 8080)."
+  value       = "http://${module.web.alb_dns_name}:${module.fargate.listener_port}"
+}
+
+output "fargate_service" {
+  value = "${module.fargate.cluster_name}/${module.fargate.service_name}"
 }
