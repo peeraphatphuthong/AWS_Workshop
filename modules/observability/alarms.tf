@@ -23,7 +23,7 @@ locals {
       description = "Web host CPU > 80% for 15 minutes."
       namespace   = "AWS/EC2"
       metric      = "CPUUtilization"
-      dimensions  = { InstanceId = aws_instance.web.id }
+      dimensions  = { InstanceId = var.instance_id }
       statistic   = "Average"
       period      = 300
       periods     = 3
@@ -36,7 +36,7 @@ locals {
       description = "Web host spent > 60 surplus CPU credits (unlimited mode, billed at $0.05/vCPU-hour if not earned back)."
       namespace   = "AWS/EC2"
       metric      = "CPUSurplusCreditBalance"
-      dimensions  = { InstanceId = aws_instance.web.id }
+      dimensions  = { InstanceId = var.instance_id }
       statistic   = "Maximum"
       period      = 300
       periods     = 1
@@ -48,7 +48,7 @@ locals {
       description = "RDS CPU > 80% for 15 minutes."
       namespace   = "AWS/RDS"
       metric      = "CPUUtilization"
-      dimensions  = { DBInstanceIdentifier = aws_db_instance.mysql.identifier }
+      dimensions  = { DBInstanceIdentifier = var.db_identifier }
       statistic   = "Average"
       period      = 300
       periods     = 3
@@ -62,7 +62,7 @@ locals {
       description = "RDS connections > 40 (pool leak / too many app instances; max is ~60)."
       namespace   = "AWS/RDS"
       metric      = "DatabaseConnections"
-      dimensions  = { DBInstanceIdentifier = aws_db_instance.mysql.identifier }
+      dimensions  = { DBInstanceIdentifier = var.db_identifier }
       statistic   = "Maximum"
       period      = 300
       periods     = 2
@@ -73,7 +73,7 @@ locals {
       description = "RDS free storage < 2 GiB (storage autoscaling is off)."
       namespace   = "AWS/RDS"
       metric      = "FreeStorageSpace"
-      dimensions  = { DBInstanceIdentifier = aws_db_instance.mysql.identifier }
+      dimensions  = { DBInstanceIdentifier = var.db_identifier }
       statistic   = "Minimum"
       period      = 300
       periods     = 1
@@ -84,7 +84,7 @@ locals {
       description = "RDS freeable memory < 64 MiB (swapping / OOM risk on a 1 GiB instance)."
       namespace   = "AWS/RDS"
       metric      = "FreeableMemory"
-      dimensions  = { DBInstanceIdentifier = aws_db_instance.mysql.identifier }
+      dimensions  = { DBInstanceIdentifier = var.db_identifier }
       statistic   = "Minimum"
       period      = 300
       periods     = 3
@@ -154,7 +154,7 @@ resource "aws_cloudwatch_metric_alarm" "ec2_auto_recover" {
   alarm_description   = "AWS system status check failed -> auto-recover the web host onto new hardware."
   namespace           = "AWS/EC2"
   metric_name         = "StatusCheckFailed_System"
-  dimensions          = { InstanceId = aws_instance.web.id }
+  dimensions          = { InstanceId = var.instance_id }
   statistic           = "Maximum"
   period              = 60
   evaluation_periods  = 2
@@ -170,8 +170,8 @@ resource "aws_cloudwatch_metric_alarm" "ec2_auto_recover" {
 # Dashboard (first 3 dashboards are free): one page to look at during an incident.
 # ------------------------------------------------------------------------------------------
 locals {
-  ec2_dim = ["InstanceId", aws_instance.web.id]
-  rds_dim = ["DBInstanceIdentifier", aws_db_instance.mysql.identifier]
+  ec2_dim = ["InstanceId", var.instance_id]
+  rds_dim = ["DBInstanceIdentifier", var.db_identifier]
 
   dashboard_widgets = [
     { title = "Health check (1 = OK)", metrics = [[local.metric_namespace, "HealthCheckOk", { stat = "Minimum" }]] },
@@ -217,7 +217,7 @@ resource "aws_cloudwatch_dashboard" "main" {
           properties = {
             title  = "Slowest requests (nginx, last 3h)"
             region = var.aws_region
-            query  = "SOURCE '${aws_cloudwatch_log_group.containers.name}' | filter ispresent(status) | sort rt desc | fields @timestamp, status, method, uri, rt | limit 20"
+            query  = "SOURCE '${var.container_log_group_name}' | filter ispresent(status) | sort rt desc | fields @timestamp, status, method, uri, rt | limit 20"
             view   = "table"
           }
         },

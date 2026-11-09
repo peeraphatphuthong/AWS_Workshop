@@ -15,7 +15,7 @@ locals {
 data "archive_file" "healthcheck" {
   type        = "zip"
   source_file = "${path.module}/lambda/healthcheck.py"
-  output_path = "${path.module}/.build/healthcheck.zip"
+  output_path = "${path.root}/.build/healthcheck.zip" # root dir: CI uploads <root>/.build with the plan
   # Fixed permissions: a zip built on Windows otherwise differs from one built on Linux (CI), which
   # shows up as a fake source_code_hash diff when planning from a laptop.
   output_file_mode = "0644"
@@ -89,8 +89,8 @@ resource "aws_lambda_function" "healthcheck" {
 
   environment {
     variables = {
-      URL         = "http://${aws_eip.web.public_ip}/readyz"
-      INSTANCE_ID = aws_instance.web.id
+      URL         = "http://${var.public_ip}/readyz"
+      INSTANCE_ID = var.instance_id
       NAMESPACE   = local.metric_namespace
     }
   }

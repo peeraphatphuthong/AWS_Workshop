@@ -9,16 +9,16 @@ data "aws_ssm_parameter" "al2023_ami" {
 }
 
 locals {
-  web_subnet_key = "public-${substr(local.azs[0], -1, 1)}" # "public-a"
-  web_subnet     = aws_subnet.this[local.web_subnet_key]
+  name_prefix  = var.name_prefix
+  param_prefix = var.param_prefix
 
   # Fixed private IP: .50 inside the subnet (cidrhost avoids typing "10.20.1.50" by hand).
-  web_private_ip = cidrhost(local.public_subnets[local.web_subnet_key].cidr, 50)
+  web_private_ip = cidrhost(var.subnet.cidr, 50)
 
   # Parameter names starting with "aws" or "ssm" are RESERVED by SSM (AccessDenied
   # "No access to reserved parameter name"), so the prefix can't be "/aws-workshop/".
   image_tag_param_name = "${local.param_prefix}/app/image-tag"
-  ecr_registry         = split("/", aws_ecr_repository.app.repository_url)[0]
+  ecr_registry         = split("/", var.ecr_repository_url)[0]
 }
 
 # Desired app version lives in Parameter Store. Terraform creates it once; after that the
@@ -36,10 +36,10 @@ resource "aws_ssm_parameter" "image_tag" {
 
 resource "aws_instance" "web" {
   ami                    = data.aws_ssm_parameter.al2023_ami.value
-  instance_type          = var.web_instance_type
-  subnet_id              = local.web_subnet.id
+  instance_type          = var.instance_type
+  subnet_id              = var.subnet.id
   private_ip             = local.web_private_ip
-  vpc_security_group_ids = [aws_security_group.web.id]
+  vpc_security_group_ids = [var.security_group_id]
   iam_instance_profile   = aws_iam_instance_profile.web.name
 
   # IMDSv2 only. Hop limit 2 so containers (one extra network hop) can still reach IMDS.
@@ -70,16 +70,16 @@ resource "aws_instance" "web" {
   user_data = templatefile("${path.module}/templates/user_data.sh.tftpl", {
     region          = var.aws_region
     ecr_registry    = local.ecr_registry
-    ecr_repository  = aws_ecr_repository.app.name
+    ecr_repository  = var.ecr_repository_name
     image_tag_param = local.image_tag_param_name
     # EBS volume ID lets the script find the right NVMe device (see note on aws_ebs_volume).
     data_volume_id         = aws_ebs_volume.app_data.id
-    db_app_secret_arn      = aws_secretsmanager_secret.db_app.arn
-    db_master_secret_arn   = aws_db_instance.mysql.master_user_secret[0].secret_arn
+    db_app_secret_arn      = var.db_app_secret_arn
+    db_master_secret_arn   = var.db_master_secret_arn
     compose_version        = "v5.6.1"
     compose_sha256         = "47737f4236e6d3ccea7291995203f8f018058783b4c3a9469119811a0b5db8c0"
-    docker_compose_content = file("${path.module}/../app/docker-compose.yml")
-    nginx_conf_content     = file("${path.module}/../app/nginx/nginx.conf")
+    docker_compose_content = var.docker_compose_content
+    nginx_conf_content     = var.nginx_conf_content
     container_log_group    = aws_cloudwatch_log_group.containers.name
   })
   # Treat the host as immutable: a bootstrap change builds a fresh instance instead of
@@ -104,8 +104,9 @@ resource "aws_instance" "web" {
     aws_iam_role_policy_attachment.web_ecr,
     aws_iam_role_policy.web_params,
     aws_iam_role_policy.web_db_secrets,
-    aws_iam_role_policy.web_logs,             # Docker's awslogs driver must be allowed to write before containers start
-    aws_secretsmanager_secret_version.db_app, # secret must have a value before first boot
+    aws_iam_role_policy.web_logs, # Docker's awslogs driver must be allowed to write before containers start
+    # The DB app secret must have a VALUE before first boot: var.db_app_secret_arn comes from a
+    # database-module output that depends on the secret version, so that ordering is implicit.
   ]
 }
 
@@ -114,7 +115,7 @@ resource "aws_instance" "web" {
 # Note: using aws_instance.web.availability_zone here would create a dependency cycle, because
 # the instance's user_data needs this volume's ID.
 resource "aws_ebs_volume" "app_data" {
-  availability_zone = local.web_subnet.availability_zone
+  availability_zone = var.subnet.az
   size              = var.data_volume_size_gb
   type              = "gp3"
   encrypted         = true
@@ -136,9 +137,9 @@ resource "aws_eip" "web" {
   instance                  = aws_instance.web.id
   associate_with_private_ip = local.web_private_ip
 
-  # An EIP in a VPC needs the Internet Gateway attached first. Terraform can't infer this
-  # (no attribute reference), so the dependency is declared explicitly.
-  depends_on = [aws_internet_gateway.main]
+  # An EIP in a VPC needs the Internet Gateway attached first. Inside one stack this was an
+  # explicit depends_on; across modules the network module's public_subnets output depends on
+  # the IGW + default route, and the instance (-> this EIP) uses that subnet.
 
   tags = { Name = "${local.name_prefix}-web-eip" }
 }

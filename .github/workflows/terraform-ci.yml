@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - "infra/**"
+      - "modules/**"
       - "bootstrap/**"
       - "app/docker-compose.yml" # embedded in EC2 user_data
       - "app/nginx/**"           # embedded in EC2 user_data
@@ -46,6 +47,10 @@ jobs:
 
       - name: terraform fmt
         run: terraform fmt -check -recursive -diff
+
+      - name: terraform fmt (modules)
+        if: matrix.stack == 'infra'
+        run: terraform fmt -check -recursive -diff ../modules
 
       - name: terraform init (no backend)
         run: terraform init -backend=false -input=false

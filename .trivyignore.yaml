@@ -14,7 +14,7 @@ misconfigurations:
 
   - id: AWS-0104
     paths:
-      - "infra/security_groups.tf"
+      - "modules/network/security_groups.tf"
     statement: >-
       Web host egress on 80/443 to 0.0.0.0/0 is required: it reaches ECR, SSM, Secrets Manager, OS
       package mirrors, Docker Hub and GitHub without NAT/VPC endpoints. Only 80/443 are open (plus 3306

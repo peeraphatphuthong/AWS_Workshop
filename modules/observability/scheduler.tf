@@ -43,13 +43,13 @@ data "aws_iam_policy_document" "scheduler" {
   statement {
     sid       = "StartStopWebHost"
     actions   = ["ec2:StartInstances", "ec2:StopInstances"]
-    resources = [aws_instance.web.arn]
+    resources = [var.instance_arn]
   }
 
   statement {
     sid       = "StartStopDatabase"
     actions   = ["rds:StartDBInstance", "rds:StopDBInstance"]
-    resources = [aws_db_instance.mysql.arn]
+    resources = [var.db_arn]
   }
 
   statement {
@@ -70,22 +70,22 @@ locals {
     "start-db" = {
       cron   = var.office_hours.start_db
       target = "arn:aws:scheduler:::aws-sdk:rds:startDBInstance"
-      input  = { DbInstanceIdentifier = aws_db_instance.mysql.identifier }
+      input  = { DbInstanceIdentifier = var.db_identifier }
     }
     "start-web" = {
       cron   = var.office_hours.start_web
       target = "arn:aws:scheduler:::aws-sdk:ec2:startInstances"
-      input  = { InstanceIds = [aws_instance.web.id] }
+      input  = { InstanceIds = [var.instance_id] }
     }
     "stop-web" = {
       cron   = var.office_hours.stop_web
       target = "arn:aws:scheduler:::aws-sdk:ec2:stopInstances"
-      input  = { InstanceIds = [aws_instance.web.id] }
+      input  = { InstanceIds = [var.instance_id] }
     }
     "stop-db" = {
       cron   = var.office_hours.stop_db
       target = "arn:aws:scheduler:::aws-sdk:rds:stopDBInstance"
-      input  = { DbInstanceIdentifier = aws_db_instance.mysql.identifier }
+      input  = { DbInstanceIdentifier = var.db_identifier }
     }
   }
 }
