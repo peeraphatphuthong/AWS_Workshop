@@ -31,3 +31,20 @@ misconfigurations:
       Messages contain only alarm names/metric values (no secrets or personal data); publish is limited
       to this account's CloudWatch/Budgets by the topic policy. Use a CMK in production.
     expired_at: 2027-05-08
+
+  - id: AWS-0053
+    paths:
+      - "modules/web/compute.tf"
+    statement: >-
+      The ALB is internet-facing on purpose: it is the public entry point of a public web app. It is the
+      only internet-reachable component; instances accept traffic from the ALB security group only.
+    expired_at: 2027-05-08
+
+  - id: AWS-0054
+    paths:
+      - "modules/web/compute.tf"
+    statement: >-
+      HTTP-only listener because the sandbox has no domain to issue an ACM certificate for. The app serves
+      no credentials or personal data. Production requires an HTTPS listener (ACM cert, TLS 1.2+ policy)
+      with an HTTP->HTTPS redirect. Short expiry: CRITICAL finding, re-review in 3 months.
+    expired_at: 2027-02-09

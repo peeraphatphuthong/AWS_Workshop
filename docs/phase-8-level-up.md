@@ -178,6 +178,12 @@ The ALB itself keeps running (and billing) at night.
 - New `alb-unhealthy-hosts` (still 10 alarms). EC2 CPU alarms use the `AutoScalingGroupName` dimension.
 - Dashboard: ALB requests, p95 target response time, healthy/unhealthy targets, instances in service.
 
+### Security scan findings (accepted, expiring)
+| ID | Finding | Decision |
+|---|---|---|
+| AWS-0053 | ALB is internet-facing | Accepted: it is the public entry point; instances only accept the ALB SG |
+| AWS-0054 (CRITICAL) | Listener is HTTP, not HTTPS | Accepted for 3 months: no domain/ACM cert in the sandbox; production = HTTPS listener + redirect |
+
 ### Cost
 ALB ≈ $0.60/day (fixed + LCU). EBS data volume removed (−$0.03). The EIP is released, but each instance now needs
 a public IPv4 ($0.12/day each) to reach AWS APIs without a NAT Gateway, so that saving cancels out.
