@@ -17,10 +17,10 @@ terraform {
     }
   }
 
-  # Same bucket as bootstrap, different key = separate state per stack (smaller blast radius).
+  # Same bucket as bootstrap, one key per environment = separate state per env (smaller blast radius).
   backend "s3" {
     bucket       = "aws-workshop-tfstate-525091405764-ap-southeast-2"
-    key          = "infra/terraform.tfstate"
+    key          = "envs/prod/terraform.tfstate"
     region       = "ap-southeast-2"
     encrypt      = true
     use_lockfile = true
@@ -28,7 +28,7 @@ terraform {
 }
 
 provider "aws" {
-  region = var.aws_region
+  region = local.aws_region
 
   default_tags {
     tags = local.common_tags

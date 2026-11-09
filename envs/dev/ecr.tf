@@ -1,6 +1,9 @@
 # Private container registry for the app image.
+# Shared by ALL environments (build once, promote the same image dev -> prod), so it is owned by
+# this stack and read by envs/prod with a data source. A larger setup would give it its own
+# "shared" stack.
 resource "aws_ecr_repository" "app" {
-  name = "${var.project}/retail-health"
+  name = "${local.project}/retail-health"
 
   # IMMUTABLE: a tag (git SHA) always points to the same image. Prevents "someone re-pushed
   # the tag" surprises and makes rollbacks exact. No mutable `latest` tag in production.
@@ -17,7 +20,7 @@ resource "aws_ecr_repository" "app" {
   # Lab setting: allow `terraform destroy` even if images exist. In production keep this false.
   force_delete = true
 
-  tags = { Name = "${var.project}-retail-health" }
+  tags = { Name = "${local.project}-retail-health" }
 }
 
 # Storage costs money ($0.10/GB-month): keep only what's useful for rollbacks.

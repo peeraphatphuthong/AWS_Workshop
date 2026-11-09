@@ -59,18 +59,19 @@ resource "aws_db_instance" "mysql" {
   vpc_security_group_ids = [var.security_group_id]
   parameter_group_name   = aws_db_parameter_group.mysql.name
   publicly_accessible    = false
-  multi_az               = false # Multi-AZ doubles the price; for prod this would be true
+  multi_az               = var.multi_az # synchronous standby in another AZ: ~2x price
 
-  backup_retention_period    = 1
+  backup_retention_period    = var.backup_retention_days
   backup_window              = "17:00-17:30" # UTC = 00:00-00:30 Bangkok
   maintenance_window         = "sun:18:00-sun:18:30"
   auto_minor_version_upgrade = true
   copy_tags_to_snapshot      = true
 
-  # Lab settings — in production: deletion_protection = true, skip_final_snapshot = false
-  deletion_protection = false
-  skip_final_snapshot = true
-  apply_immediately   = true
+  # dev: false / true (cheap to throw away). prod: true / false (see envs/prod).
+  deletion_protection       = var.deletion_protection
+  skip_final_snapshot       = var.skip_final_snapshot
+  final_snapshot_identifier = var.skip_final_snapshot ? null : "${local.db_identifier}-final"
+  apply_immediately         = var.apply_immediately
 
   # Ship MySQL error + slow query logs to CloudWatch Logs (Phase 7). The log groups are created
   # first (logs.tf) so they get a retention period instead of "Never expire".

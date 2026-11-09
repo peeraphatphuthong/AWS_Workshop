@@ -1,6 +1,6 @@
 name: terraform-apply
 
-# On merge to main:
+# On merge to main (dev only — envs/prod is plan-only in this workshop):
 #   plan  : saved plan with the read-only user, shown in the job summary
 #   apply : waits for a human approval (environment aws-dev-infra), then applies EXACTLY that plan.
 # Terraform refuses to apply a saved plan if the state changed in between ("stale plan").
@@ -8,7 +8,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "infra/**"
+      - "envs/dev/**"
       - "modules/**"
       - "app/docker-compose.yml"
       - "app/nginx/**"
@@ -35,7 +35,7 @@ jobs:
       has_changes: ${{ steps.plan.outputs.has_changes }}
     defaults:
       run:
-        working-directory: infra
+        working-directory: envs/dev
     steps:
       - uses: actions/checkout@v5
 
@@ -63,7 +63,7 @@ jobs:
           if [ "$code" -eq 1 ]; then exit 1; fi
           if [ "$code" -eq 2 ]; then echo "has_changes=true" >> "$GITHUB_OUTPUT"; else echo "has_changes=false" >> "$GITHUB_OUTPUT"; fi
           {
-            echo "### Terraform plan for \`infra\` @ ${GITHUB_SHA::7}"
+            echo "### Terraform plan for \`envs/dev\` @ ${GITHUB_SHA::7}"
             echo '```'
             terraform show -no-color tfplan | grep -E '^\s+# .+ (will be|must be)' | sed 's/^ *//' || true
             grep -E '^Plan:|^No changes' plan.log | tail -n1 || true
@@ -80,8 +80,8 @@ jobs:
           name: tfplan-infra-${{ github.sha }}
           # .build = Lambda zips created by archive_file during plan; apply needs the same files.
           path: |
-            infra/tfplan
-            infra/.build/
+            envs/dev/tfplan
+            envs/dev/.build/
           include-hidden-files: true
           retention-days: 1
 
@@ -92,7 +92,7 @@ jobs:
     environment: aws-dev-infra # required reviewer + main only
     defaults:
       run:
-        working-directory: infra
+        working-directory: envs/dev
     steps:
       - uses: actions/checkout@v5
 
@@ -110,7 +110,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: tfplan-infra-${{ github.sha }}
-          path: infra
+          path: envs/dev
 
       - run: terraform init -input=false
 

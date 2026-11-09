@@ -35,3 +35,34 @@ variable "log_retention_days" {
   type        = number
   default     = 7
 }
+
+# ---- production knobs (defaults = lab/dev settings) ----
+variable "multi_az" {
+  description = "Synchronous standby in a second AZ with automatic failover (~2x price)."
+  type        = bool
+  default     = false
+}
+
+variable "backup_retention_days" {
+  description = "Automated backup / point-in-time-restore window."
+  type        = number
+  default     = 1
+}
+
+variable "deletion_protection" {
+  description = "Block DeleteDBInstance (also blocks terraform destroy until turned off)."
+  type        = bool
+  default     = false
+}
+
+variable "skip_final_snapshot" {
+  description = "Delete without a final snapshot. Must be false where data matters."
+  type        = bool
+  default     = true
+}
+
+variable "apply_immediately" {
+  description = "Apply modifications now instead of in the next maintenance window."
+  type        = bool
+  default     = true
+}
