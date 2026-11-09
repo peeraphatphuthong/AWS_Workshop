@@ -7,7 +7,7 @@ Phase 8 is split into small PRs. Each one is shippable on its own.
 | 8.1 | Refactor the flat `infra/` stack into modules with `moved` blocks (zero-change plan) | $0 | ✅ |
 | 8.2 | Multi-environment layout (dev applied, prod plan-only) | $0 | ✅ |
 | 8.3 | ALB + Auto Scaling Group (stateless web tier) | ~+$0.57/day | ✅ |
-| 8.4 | ECS Fargate comparison | small | ⬜ |
+| 8.4 | ECS Fargate comparison (same ALB :8080, Fargate Spot) | ~+$0.13/day | 🚧 |
 
 ## 8.1 Modules
 
@@ -200,6 +200,91 @@ Net ≈ **+$0.57/day**. Cheaper-than-NAT alternatives for private instances: VPC
   A: The ASG would replace them. Scale the group (scheduled actions / desired capacity 0) instead.
 - **Q: Your instances need internet egress but you don't want public IPs. Options?**
   A: NAT Gateway (managed, ~$45/month + data), NAT instance (cheap, self-managed), VPC endpoints for AWS services.
+
+## 8.4 ECS Fargate comparison
+
+The same image, the same ALB, the same database, run two ways side by side:
+
+```
+                ┌─ :80   ─► target group (instance) ─► ASG: EC2 t3.micro ─► nginx ─► app   [modules/web]
+Internet ─► ALB ┤                                                                   ╲
+                └─ :8080 ─► target group (ip)       ─► ECS service: Fargate task ─► app ─► RDS MySQL
+                                                                         [modules/fargate]
+```
+
+`terraform -chdir=envs/dev output fargate_url` → `http://<alb dns>:8080`. Dev only: it is a lab, so `envs/prod`
+does not use the module, and removing the `module "fargate"` block removes every trace of it (the module also owns
+the rules it adds to the ALB and DB security groups).
+
+### What changes when there is no host
+
+| | EC2 + ASG (8.3) | ECS Fargate (8.4) |
+|---|---|---|
+| Unit of compute | instance (VM you own: OS, Docker, agent) | task (container; AWS runs and patches the host) |
+| Definition | launch template + 200-line `user_data` bash | task definition (JSON): image, CPU/memory, env, secrets, health check, logs |
+| Start time | ~4 min (dnf, Docker, Compose, pull, bootstrap) | ~1 min (ENI + image pull) |
+| Size | t3.micro = 2 vCPU burst / 1 GiB | 0.25 vCPU / 0.5 GiB (the app needs no more) |
+| Networking | host ENI + host SG; containers share it | `awsvpc`: every task has its own ENI, private IP and SG; ALB target type `ip` |
+| Reverse proxy | nginx container (headers, gzip, access log) | none: ALB → app directly (headers would move to the app or CloudFront) |
+| DB credentials | host role reads the secret, `deploy-app` writes an env file | ECS agent injects JSON keys of the secret as env vars (`secrets` + `valueFrom`) |
+| IAM | instance role: SSM, ECR, params, both DB secrets, logs | execution role (ECR, logs, app secret only); no task role at all |
+| Shell access | SSM Session Manager | ECS Exec (not enabled: needs a task role + SSM channels) |
+| Deploy | SSM Run Command runs a script on each instance | register a new task definition revision, `update-service` |
+| Rollback | our pipeline step | deployment circuit breaker (`rollback = true`) + pipeline step |
+| Scale | ASG target tracking on instance CPU | service desired count (Application Auto Scaling, not added) |
+| Night | scheduler sets ASG min/desired 0 | scheduler sets service desired count 0 |
+| Cost model | per instance-second, idle capacity included | per task vCPU/GB-second; Spot ~70 % cheaper |
+
+### Design notes
+- **One ALB, two listeners.** A second ALB would cost ~$18/month just for the comparison. Port 8080 + its own
+  target group gives an independent path with the same DNS name.
+- **Same image tag source.** The task definition reads the SSM parameter `/retail-health/dev/app/image-tag`
+  (the one EC2 instances read at boot). The pipeline writes that parameter and registers a revision with the same
+  image, and the task definition uses `track_latest = true`, so a pipeline deploy is not seen as drift.
+- **Read-only root filesystem + non-root user** like the Compose file. `/data` is declared as a `VOLUME` in the
+  Dockerfile so Fargate copies the image's `node`-owned directory into the task's ephemeral volume.
+- **Public subnets + public IP** for the tasks, for the same reason as the instances: no NAT Gateway. Inbound is
+  still only the ALB security group; egress is 443 (AWS APIs) and 3306 to the DB SG — no port 80 because there is
+  no OS to patch.
+- **ECS service-linked role created in bootstrap.** 8.3's first apply failed because Auto Scaling created its
+  service-linked role on first use and IAM had not propagated it yet. Account-level prerequisites now go in the
+  bootstrap stack, applied before the stack that needs them.
+- **No Container Insights** (billed as custom metrics). The dashboard uses the free `AWS/ECS` CPU/memory metrics
+  and compares p95 response time and healthy targets of both target groups. No new alarm: the 10 free-tier alarms
+  are taken, and the circuit breaker + deploy smoke test cover a broken Fargate release.
+
+### Cost (approximate, Sydney)
+| | per hour | per day (14 h office hours) |
+|---|---|---|
+| Fargate 0.25 vCPU / 0.5 GiB, on-demand | ~$0.015 | ~$0.21 |
+| Fargate Spot (dev setting) | ~$0.0045 | ~$0.06 |
+| Public IPv4 per task | $0.005 | $0.07 |
+| **Dev total (Spot + IPv4)** | **~$0.01** | **~$0.13** (≈ $4/month) |
+
+Listener, target group, cluster, task definitions: no charge. Logs: a few MB at 7-day retention.
+Rule of thumb: Fargate costs more per vCPU than EC2, but you pay only for what each task reserves, with no idle
+instance headroom, OS patching or AMI pipeline. Small or spiky services usually win on Fargate; large steady fleets
+on EC2 (or ECS on EC2 with Savings Plans).
+
+### Interview Q&A (8.4)
+- **Q: ECS task execution role vs task role?**
+  A: The execution role is used by the ECS agent to start the task (pull the image, write logs, fetch secrets).
+  The task role is what the application code uses for its own AWS calls. Grant each only what it needs; a task
+  with no AWS calls needs no task role.
+- **Q: How do you deploy to ECS without downtime, and how does it roll back?**
+  A: Register a new task definition revision and update the service; with minimum healthy 100 % / maximum 200 %
+  ECS starts new tasks, waits until they pass the target group health check, then drains the old ones. The
+  deployment circuit breaker stops a failing rollout and returns to the last steady revision.
+- **Q: How do secrets reach a container on ECS?**
+  A: `secrets` in the container definition reference Secrets Manager (optionally a single JSON key) or SSM
+  parameters; the agent resolves them at task start using the execution role. Values never appear in the task
+  definition, and a new value needs a new deployment (tasks don't reload).
+- **Q: When would you choose EC2 over Fargate?**
+  A: GPUs or special instance types, daemons/host access, very large steady workloads where reserved EC2 is
+  cheaper, or needing more than Fargate's limits. Otherwise Fargate removes host management.
+- **Q: Fargate Spot — what happens on interruption?**
+  A: The task gets a SIGTERM with a 2-minute warning and is stopped; the service starts a replacement (on Spot if
+  capacity exists). Fine for dev and stateless, multi-task services; mix in a `FARGATE` base for production.
 
 ## Verified before 8.1 (office-hours scheduler, Phase 7 follow-up)
 - EC2 stopped 22:00 and started 08:00 (Asia/Bangkok) — app uptime matched.

@@ -153,6 +153,7 @@ jobs:
   #   record current tag -> set desired tag in Parameter Store -> SSM Run Command deploy-app on EVERY
   #   instance of the ASG, one at a time -> smoke test through the ALB -> on failure, roll back.
   #   Instances launched later (scale-out, refresh, morning start) read the tag at boot.
+  #   Phase 8.4: then the same image goes to the ECS Fargate service (new task definition revision).
   deploy:
     needs: push
     runs-on: ubuntu-latest
@@ -163,6 +164,8 @@ jobs:
       TAG_PARAM: /retail-health/dev/app/image-tag
       ASG_NAME: aws-workshop-dev-web
       ALB_NAME: aws-workshop-dev-alb
+      ECS_CLUSTER: aws-workshop-dev
+      ECS_SERVICE: aws-workshop-dev-app
       NEW_TAG: ${{ github.sha }}
     steps:
       - uses: aws-actions/configure-aws-credentials@v5
@@ -240,14 +243,83 @@ jobs:
           done
           echo "### Deployed \`${NEW_TAG::7}\` to $URL ✅" >> "$GITHUB_STEP_SUMMARY"
 
+      # ---- Phase 8.4: the same image on ECS Fargate (same ALB, port 8080) ----
+      # Deploy = register a new task definition revision (copy of the current one, new image) and point
+      # the service at it. ECS does the rolling replacement; its circuit breaker rolls back by itself.
+      - name: Fargate - register new task definition and update the service
+        id: ecs
+        run: |
+          set -euo pipefail
+          svc=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
+            --query 'services[?status==`ACTIVE`]|[0].[taskDefinition,desiredCount]' --output text 2>/dev/null || true)
+          if [ -z "$svc" ] || [ "$svc" = "None" ]; then
+            echo "::notice::ECS service $ECS_CLUSTER/$ECS_SERVICE not found - skipping the Fargate deploy."
+            exit 0
+          fi
+          read -r CUR_TD DESIRED <<< "$svc"
+          aws ecs describe-task-definition --task-definition "$CUR_TD" --include TAGS \
+            --query '{td: taskDefinition, tags: tags}' > current.json
+          # Keep everything (CPU, secrets, health check, tags...) and change only the app image tag;
+          # drop the read-only fields that describe returns but register does not accept.
+          jq --arg tag "$NEW_TAG" '
+            .td
+            | .containerDefinitions |= map(if .name == "app" then .image = (.image | sub(":[^:/]+$"; "")) + ":" + $tag else . end)
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities,
+                  .registeredAt, .registeredBy, .deregisteredAt)
+          ' current.json > next.json
+          tags=$(jq -c '.tags // []' current.json)
+          if [ "$tags" != "[]" ]; then jq --argjson t "$tags" '. + {tags: $t}' next.json > next-tagged.json && mv next-tagged.json next.json; fi
+          NEW_TD=$(aws ecs register-task-definition --cli-input-json file://next.json \
+            --query taskDefinition.taskDefinitionArn --output text)
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" \
+            --task-definition "$NEW_TD" > /dev/null
+          {
+            echo "previous_td=$CUR_TD"
+            echo "new_td=$NEW_TD"
+            echo "desired=$DESIRED"
+          } >> "$GITHUB_OUTPUT"
+          echo "Fargate: ${CUR_TD##*/} -> ${NEW_TD##*/} (desired tasks: $DESIRED)"
+
+      - name: Fargate - wait for the rollout and smoke test port 8080
+        if: steps.ecs.outputs.new_td != '' && steps.ecs.outputs.desired != '0'
+        env:
+          NEW_TD: ${{ steps.ecs.outputs.new_td }}
+          URL: ${{ steps.target.outputs.url }}:8080
+        run: |
+          set -euo pipefail
+          state=""
+          for _ in $(seq 1 60); do
+            read -r state td <<< "$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
+              --query 'services[0].deployments[?status==`PRIMARY`]|[0].[rolloutState,taskDefinition]' --output text)"
+            if [ "$td" != "$NEW_TD" ]; then
+              echo "::error::ECS circuit breaker rolled the service back to ${td##*/}"; exit 1
+            fi
+            case "$state" in COMPLETED) break ;; FAILED) echo "::error::ECS rollout failed"; exit 1 ;; esac
+            sleep 10
+          done
+          [ "$state" = "COMPLETED" ] || { echo "::error::ECS rollout did not finish in 10 minutes"; exit 1; }
+          for _ in 1 2 3; do
+            curl -fsS --retry 6 --retry-delay 5 --retry-all-errors "$URL/api/status" -o status.json
+            jq -c '{sha: .app.gitSha[0:7], db: .db.status}' status.json
+            jq -e --arg sha "$NEW_TAG" '.app.gitSha == $sha and .db.status == "ok"' status.json > /dev/null \
+              || { echo "::error::Fargate is not serving $NEW_TAG with a working DB"; exit 1; }
+          done
+          echo "### Fargate: deployed \`${NEW_TAG::7}\` to $URL ✅" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Roll back to previous version
         if: failure() && steps.target.outputs.previous_tag != ''
         env:
           IDS: ${{ steps.target.outputs.instance_ids }}
           PREV: ${{ steps.target.outputs.previous_tag }}
+          PREV_TD: ${{ steps.ecs.outputs.previous_td }}
         run: |
           echo "::warning::Deploy failed - rolling back to ${PREV::7}"
           aws ssm put-parameter --name "$TAG_PARAM" --value "$PREV" --overwrite > /dev/null
+          if [ -n "$PREV_TD" ]; then
+            aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" \
+              --task-definition "$PREV_TD" > /dev/null
+            echo "Fargate service pointed back to ${PREV_TD##*/}"
+          fi
           if [ -n "$IDS" ]; then
             # shellcheck disable=SC2086 # one argument per instance ID
             aws ssm send-command --instance-ids $IDS --document-name AWS-RunShellScript \

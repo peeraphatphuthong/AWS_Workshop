@@ -28,3 +28,8 @@ output "image_tag_parameter" {
 output "container_log_group_name" {
   value = aws_cloudwatch_log_group.containers.name
 }
+
+output "alb_arn" {
+  description = "Lets other modules add listeners to the same load balancer (Phase 8.4 Fargate)."
+  value       = aws_lb.web.arn
+}

@@ -90,6 +90,7 @@ data "aws_iam_policy_document" "github_ci" {
       "ec2:*",
       "elasticloadbalancing:*",
       "autoscaling:*",
+      "ecs:*",
       "rds:*",
       "ecr:*",
       "ssm:*",
@@ -181,4 +182,13 @@ resource "aws_iam_policy" "github_ci" {
 resource "aws_iam_user_policy_attachment" "github_ci" {
   user       = aws_iam_user.github_ci.name
   policy_arn = aws_iam_policy.github_ci.arn
+}
+
+# Phase 8.4: create the ECS service-linked role here, ahead of time. In 8.3 the first apply failed
+# because Auto Scaling created ITS service-linked role on first use and IAM had not propagated it
+# yet ("Access denied when attempting to assume role ... AWSServiceRoleForAutoScaling").
+# Creating account-level prerequisites in bootstrap avoids that race for ECS.
+resource "aws_iam_service_linked_role" "ecs" {
+  aws_service_name = "ecs.amazonaws.com"
+  description      = "ECS service-linked role (created by bootstrap before the first Fargate service)"
 }

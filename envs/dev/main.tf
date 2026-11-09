@@ -4,7 +4,8 @@
 # Every environment is a thin root module: settings in `locals`, then the same four modules.
 # `diff envs/dev/main.tf envs/prod/main.tf` shows exactly how the environments differ.
 #
-#   network ──subnets, SGs──► database ──secrets──► web ──instance, EIP, logs──► observability
+#   network ──subnets, SGs──► database ──secrets──► web ──ALB, ASG, logs──► observability
+#                                                     └──ALB──► fargate (8.4) ──┘
 # ------------------------------------------------------------------------------------------
 
 locals {
@@ -101,10 +102,35 @@ module "web" {
   db_app_secret_arn    = module.database.app_secret_arn
   db_master_secret_arn = module.database.master_secret_arn
 
-  # Embedded in user_data: changing either file replaces the instance (user_data_replace_on_change).
+  # Embedded in user_data: changing either file creates a new launch template version -> instance refresh.
   docker_compose_content = file("${path.root}/../../app/docker-compose.yml")
   nginx_conf_content     = file("${path.root}/../../app/nginx/nginx.conf")
 
+  log_retention_days = local.log_retention_days
+}
+
+# Phase 8.4: the same image on ECS Fargate, behind the same ALB on port 8080, using the same DB.
+# Dev only (a comparison lab): delete this block to remove every Fargate resource.
+module "fargate" {
+  source = "../../modules/fargate"
+
+  project      = local.project
+  name_prefix  = local.name_prefix
+  param_prefix = local.param_prefix
+  aws_region   = local.aws_region
+  vpc_id       = module.network.vpc_id
+  subnet_ids   = [for s in module.network.public_subnets : s.id]
+
+  alb_arn               = module.web.alb_arn
+  alb_security_group_id = module.network.alb_security_group_id
+  db_security_group_id  = module.network.db_security_group_id
+  db_app_secret_arn     = module.database.app_secret_arn
+  ecr_repository_url    = aws_ecr_repository.app.repository_url
+  image_tag_parameter   = module.web.image_tag_parameter
+
+  listener_port      = 8080
+  desired_count      = 1
+  use_spot           = true # dev: ~70% cheaper, a Spot interruption just restarts the task
   log_retention_days = local.log_retention_days
 }
 
@@ -129,4 +155,12 @@ module "observability" {
   db_identifier            = module.database.identifier
   db_arn                   = module.database.arn
   container_log_group_name = module.web.container_log_group_name
+
+  fargate = {
+    cluster_name            = module.fargate.cluster_name
+    service_name            = module.fargate.service_name
+    service_arn             = module.fargate.service_arn
+    desired_count           = 1
+    target_group_arn_suffix = module.fargate.target_group_arn_suffix
+  }
 }

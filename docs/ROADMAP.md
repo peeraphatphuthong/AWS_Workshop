@@ -13,7 +13,7 @@ Each phase ends with a `docs/phase-N-*.md` note (concepts, commands, interview Q
 | 5 | Database | RDS MySQL 8.4 (private, TLS), Secrets Manager, least-privilege app user | Secret handling (write-only args), defense in depth | ✅ Done |
 | 6 | Full CI/CD | PR: fmt/validate/tflint/Trivy/plan comment · main: gated apply · app deploy via SSM | GitOps for IaC, environments & approvals | ✅ Done |
 | 7 | Observability & FinOps | CloudWatch alarms + SNS, logs, dashboard, synthetic check, scheduled stop/start, orphaned-resource audit | Alerting, hidden costs | ✅ Done |
-| 8 | Level up (optional) | ALB + Auto Scaling Group, modules, dev/prod split, ECS Fargate comparison | HA, reuse, multi-env | 🚧 8.1 modules, 8.2 envs, 8.3 ALB+ASG done |
+| 8 | Level up (optional) | ALB + Auto Scaling Group, modules, dev/prod split, ECS Fargate comparison | HA, reuse, multi-env | 🚧 8.1 modules, 8.2 envs, 8.3 ALB+ASG done; 8.4 Fargate in progress |
 
 ## GCP → AWS mental map (from previous experience)
 
