@@ -1,26 +1,24 @@
-output "instance_id" {
-  value = aws_instance.web.id
+output "alb_dns_name" {
+  description = "Public DNS name of the load balancer (the app URL)."
+  value       = aws_lb.web.dns_name
 }
 
-output "instance_arn" {
-  value = aws_instance.web.arn
+output "alb_arn_suffix" {
+  description = "For CloudWatch metrics (dimension LoadBalancer)."
+  value       = aws_lb.web.arn_suffix
 }
 
-output "availability_zone" {
-  value = aws_instance.web.availability_zone
+output "target_group_arn_suffix" {
+  description = "For CloudWatch metrics (dimension TargetGroup)."
+  value       = aws_lb_target_group.web.arn_suffix
 }
 
-output "private_ip" {
-  value = aws_instance.web.private_ip
+output "asg_name" {
+  value = aws_autoscaling_group.web.name
 }
 
-output "public_ip" {
-  description = "Elastic IP of the web host."
-  value       = aws_eip.web.public_ip
-}
-
-output "ebs_volume_id" {
-  value = aws_ebs_volume.app_data.id
+output "asg_arn" {
+  value = aws_autoscaling_group.web.arn
 }
 
 output "image_tag_parameter" {

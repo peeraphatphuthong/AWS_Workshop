@@ -7,7 +7,7 @@
 # so no Lambda is needed just to stop an instance. Scheduler assumes the role below to do it.
 #
 # Side effects to know about while the stack is "asleep":
-#   - the app deploy job fails (no running instance) -> re-run it in the morning
+#   - the web ASG is at 0: the deploy job only updates the desired version (instances pick it up at boot)
 #   - RDS cannot be modified while stopped -> an apply that changes RDS must wait for office hours
 #   - AWS auto-starts a stopped RDS instance after 7 days (the daily stop handles it)
 # ------------------------------------------------------------------------------------------
@@ -38,12 +38,12 @@ resource "aws_iam_role" "scheduler" {
   assume_role_policy = data.aws_iam_policy_document.scheduler_assume.json
 }
 
-# Least privilege: only start/stop THIS instance and THIS database, invoke THIS function.
+# Least privilege: only resize THIS Auto Scaling group, start/stop THIS database, invoke THIS function.
 data "aws_iam_policy_document" "scheduler" {
   statement {
-    sid       = "StartStopWebHost"
-    actions   = ["ec2:StartInstances", "ec2:StopInstances"]
-    resources = [var.instance_arn]
+    sid       = "ResizeWebTier"
+    actions   = ["autoscaling:UpdateAutoScalingGroup"]
+    resources = [var.asg_arn]
   }
 
   statement {
@@ -72,15 +72,17 @@ locals {
       target = "arn:aws:scheduler:::aws-sdk:rds:startDBInstance"
       input  = { DbInstanceIdentifier = var.db_identifier }
     }
+    # Phase 8.3: instances in an ASG must not be STOPPED (the ASG would see them as unhealthy and
+    # replace them). Scale the group to 0 at night and back to its minimum in the morning instead.
     "start-web" = {
       cron   = var.office_hours.start_web
-      target = "arn:aws:scheduler:::aws-sdk:ec2:startInstances"
-      input  = { InstanceIds = [var.instance_id] }
+      target = "arn:aws:scheduler:::aws-sdk:autoscaling:updateAutoScalingGroup"
+      input  = { AutoScalingGroupName = var.asg_name, MinSize = var.web_min_size, DesiredCapacity = var.web_min_size }
     }
     "stop-web" = {
       cron   = var.office_hours.stop_web
-      target = "arn:aws:scheduler:::aws-sdk:ec2:stopInstances"
-      input  = { InstanceIds = [var.instance_id] }
+      target = "arn:aws:scheduler:::aws-sdk:autoscaling:updateAutoScalingGroup"
+      input  = { AutoScalingGroupName = var.asg_name, MinSize = 0, DesiredCapacity = 0 }
     }
     "stop-db" = {
       cron   = var.office_hours.stop_db

@@ -25,7 +25,7 @@ variable "az_count" {
 }
 
 variable "web_ingress" {
-  description = "Inbound rules for the web tier security group."
+  description = "Inbound rules for the public load balancer (the only internet-facing entry point)."
   type = list(object({
     description = string
     port        = number

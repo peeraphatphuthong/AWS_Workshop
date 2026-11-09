@@ -21,17 +21,32 @@ variable "alerts_topic_name" {
   type        = string
 }
 
-variable "instance_id" {
-  type = string
-}
-
-variable "instance_arn" {
-  type = string
-}
-
-variable "public_ip" {
-  description = "Public IP the synthetic health check calls."
+variable "asg_name" {
+  description = "Auto Scaling group of the web tier."
   type        = string
+}
+
+variable "asg_arn" {
+  type = string
+}
+
+variable "web_min_size" {
+  description = "Instances the morning schedule scales the web ASG back to."
+  type        = number
+  default     = 1
+}
+
+variable "app_host" {
+  description = "Public host name the synthetic health check calls (the ALB DNS name)."
+  type        = string
+}
+
+variable "alb_arn_suffix" {
+  type = string
+}
+
+variable "target_group_arn_suffix" {
+  type = string
 }
 
 variable "db_identifier" {

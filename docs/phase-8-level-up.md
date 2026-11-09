@@ -6,7 +6,7 @@ Phase 8 is split into small PRs. Each one is shippable on its own.
 |---|---|---|---|
 | 8.1 | Refactor the flat `infra/` stack into modules with `moved` blocks (zero-change plan) | $0 | ✅ |
 | 8.2 | Multi-environment layout (dev applied, prod plan-only) | $0 | ✅ |
-| 8.3 | ALB + Auto Scaling Group (stateless web tier) | ~+$0.50/day | ⬜ (needs approval) |
+| 8.3 | ALB + Auto Scaling Group (stateless web tier) | ~+$0.57/day | ✅ |
 | 8.4 | ECS Fargate comparison | small | ⬜ |
 
 ## 8.1 Modules
@@ -131,6 +131,69 @@ versioned bucket as a backup and is deleted after the merge.
 - **Q: How do you move state when you rename/move a root?**
   A: Change the backend key and `terraform init -migrate-state` (or `terraform state pull/push`), verify with a
   zero-change plan, make sure nobody applies during the move, keep the old object as a backup.
+
+## 8.3 ALB + Auto Scaling Group
+
+```
+Before:  Internet ─► EIP ─► one EC2 (10.20.1.50) + EBS data volume          (pet)
+After:   Internet ─► ALB (public-a + public-b) ─► target group ─► ASG instances (cattle)
+                     SG alb: 80 from 0.0.0.0/0       SG web: 80 from SG alb only
+```
+
+| Piece | Setting | Why |
+|---|---|---|
+| Launch template | AL2023 AMI (SSM param), t3 unlimited, IMDSv2, encrypted gp3 root, public IP, user_data | Blueprint for every instance; a new version = new instances |
+| ASG | min 1 / max 2 (prod 2 / 4), both AZs, `health_check_type = ELB`, grace 420 s | Replaces instances that fail the ALB check, spreads across AZs |
+| Target tracking | average CPU 60 % | Scale out/in by load |
+| Instance refresh | Rolling, min 100 % / max 200 % | **Launch before terminate**: infra changes (AMI, user_data) roll out with zero downtime |
+| ALB | HTTP :80, `drop_invalid_header_fields` | Single public entry; instances are no longer internet-reachable |
+| Target group health check | **`/healthz`** (liveness), not `/readyz` | See below |
+
+### Liveness for the ALB, readiness for humans
+If the target group checked `/readyz` (includes the DB), a database outage would mark **every** instance unhealthy, the
+ASG (health type ELB) would terminate them all and keep launching new ones: a DB incident becomes a full outage
+plus a launch storm. So the ALB checks `/healthz`; `/readyz` is watched from outside by the synthetic health check
+(now calling the ALB) and its alarm. Same lesson as Kubernetes liveness vs readiness probes.
+
+### Stateless instances
+- The EBS data volume and the EIP are gone. The app's health log is per-instance scratch on the root disk
+  (`/var/lib/retail-health`) and disappears with the instance; durable data lives in RDS.
+- New instances read the desired image tag from Parameter Store at boot, so scale-out, refresh and the morning
+  start always run the current release.
+
+### Office hours with an ASG
+Instances in an ASG must not be **stopped** (the ASG treats them as unhealthy and replaces them). The scheduler now
+calls `autoscaling:UpdateAutoScalingGroup`: 22:00 `MinSize=0, DesiredCapacity=0`, 08:00 back to the minimum.
+Terraform ignores `desired_capacity` and `min_size` after creation (owned by scaling policies/schedules).
+The ALB itself keeps running (and billing) at night.
+
+### Deploy pipeline
+1. List InService instances of the ASG; none (night) → only set the desired tag, done.
+2. `put-parameter` → SSM `deploy-app` on each instance **one at a time**.
+3. Smoke test through the ALB, several requests per instance (the ALB spreads them), checking git SHA + DB.
+4. On failure: restore the previous tag and redeploy.
+
+### Alarms and dashboard
+- `ec2-system-check-failed` + EC2 auto-recover → removed (the ASG replaces failed instances itself).
+- New `alb-unhealthy-hosts` (still 10 alarms). EC2 CPU alarms use the `AutoScalingGroupName` dimension.
+- Dashboard: ALB requests, p95 target response time, healthy/unhealthy targets, instances in service.
+
+### Cost
+ALB ≈ $0.60/day (fixed + LCU). EBS data volume removed (−$0.03). The EIP is released, but each instance now needs
+a public IPv4 ($0.12/day each) to reach AWS APIs without a NAT Gateway, so that saving cancels out.
+Net ≈ **+$0.57/day**. Cheaper-than-NAT alternatives for private instances: VPC endpoints (~$7/month each).
+
+### Interview Q&A (8.3)
+- **Q: What should a load balancer health check test?**
+  A: That the instance can serve (liveness), not shared dependencies; otherwise one dependency failure removes or
+  recycles the whole fleet. Watch dependencies with readiness checks and alarms.
+- **Q: How do you roll out an AMI/user_data change with no downtime?**
+  A: New launch template version + ASG instance refresh with launch-before-terminate (min 100 % / max 200 %),
+  health-checked behind the ALB; roll back by pointing the ASG at the previous template version.
+- **Q: Why can't you stop instances in an ASG to save money?**
+  A: The ASG would replace them. Scale the group (scheduled actions / desired capacity 0) instead.
+- **Q: Your instances need internet egress but you don't want public IPs. Options?**
+  A: NAT Gateway (managed, ~$45/month + data), NAT instance (cheap, self-managed), VPC endpoints for AWS services.
 
 ## Verified before 8.1 (office-hours scheduler, Phase 7 follow-up)
 - EC2 stopped 22:00 and started 08:00 (Asia/Bangkok) — app uptime matched.

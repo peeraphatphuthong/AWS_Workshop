@@ -70,7 +70,7 @@ section "Unassociated Elastic IPs" "$rows" "IP${TAB}Allocation${TAB}Name" \
 rows=$(aws ec2 describe-network-interfaces \
   --query 'NetworkInterfaces[?Association.PublicIp!=null].[Association.PublicIp,NetworkInterfaceId,InterfaceType]' --output text)
 say "### ℹ️ Public IPv4 addresses in use: $(count_lines "$rows")"
-say '_About $3.6/month each. Expected: 1 (the web EIP)._'
+say '_About $3.6/month each. Expected: one per running web instance (ASG, needed without a NAT Gateway)._'
 say ""
 
 # 4. Stopped instances: compute is free, but their EBS volumes and EIPs are not.

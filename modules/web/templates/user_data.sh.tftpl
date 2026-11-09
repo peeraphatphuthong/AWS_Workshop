@@ -6,7 +6,7 @@ set -euxo pipefail
 exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
 
 APP_DIR=/opt/retail-health
-DATA_DIR=/mnt/app-data
+DATA_DIR=/var/lib/retail-health
 
 # ---------------------------------------------------------------- 1. Docker + Compose plugin
 dnf install -y docker jq
@@ -48,32 +48,12 @@ echo "${compose_sha256}  $PLUGIN_DIR/docker-compose" | sha256sum -c -
 chmod +x "$PLUGIN_DIR/docker-compose"
 docker compose version
 
-# ---------------------------------------------------------------- 2. EBS data volume
-# On Nitro instances "/dev/sdf" appears as /dev/nvmeXn1 and the number isn't guaranteed.
-# udev creates a stable link containing the volume ID — use that to find the right disk.
-VOL_ID="${data_volume_id}"
-DEV_LINK="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_$${VOL_ID//-/}"
-
-# The attachment is created by Terraform AFTER the instance exists, so wait for it.
-for i in $(seq 1 60); do
-  [ -e "$DEV_LINK" ] && break
-  echo "waiting for $VOL_ID to attach ($i/60)"; sleep 5
-done
-[ -e "$DEV_LINK" ] || { echo "EBS volume $VOL_ID never attached"; exit 1; }
-DEV=$(readlink -f "$DEV_LINK")
-
-# Format ONLY if the disk has no filesystem yet — a re-attached volume keeps its data.
-if ! blkid "$DEV"; then
-  mkfs -t xfs -L appdata "$DEV"
-fi
-
+# ---------------------------------------------------------------- 2. Local scratch directory
+# Phase 8.3: instances are disposable (Auto Scaling), so there is no EBS data volume any more.
+# The app's health log lives on the root disk and disappears with the instance — by design.
+# Anything that must survive goes to RDS.
 mkdir -p "$DATA_DIR"
-UUID=$(blkid -s UUID -o value "$DEV")
-# fstab by UUID (device names can change between boots); nofail = still boot if it's missing.
-grep -q "$UUID" /etc/fstab || echo "UUID=$UUID $DATA_DIR xfs defaults,nofail 0 2" >> /etc/fstab
-mount -a
 chown 1000:1000 "$DATA_DIR"   # uid of the "node" user inside the app container
-df -h "$DATA_DIR"
 
 # ---------------------------------------------------------------- 3. App files
 mkdir -p "$APP_DIR/nginx"
@@ -124,7 +104,7 @@ DB_SECRET=$(retry aws secretsmanager get-secret-value --region "$REGION" --secre
 umask 077   # .env holds a password -> readable by root only
 cat > .env <<ENV_EOF
 APP_IMAGE=$IMAGE
-DATA_PATH=/mnt/app-data
+DATA_PATH=/var/lib/retail-health
 DB_HOST=$(jq -r .host <<< "$DB_SECRET")
 DB_PORT=$(jq -r .port <<< "$DB_SECRET")
 DB_NAME=$(jq -r .dbname <<< "$DB_SECRET")

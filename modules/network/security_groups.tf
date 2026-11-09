@@ -2,6 +2,43 @@
 # Rules are separate resources (aws_vpc_security_group_*_rule) instead of inline blocks —
 # the current AWS provider recommendation: each rule has its own ID, tags, and clean diffs.
 
+# ---------------------------------- Load balancer (Phase 8.3) ----------------------------------
+# The only thing exposed to the internet. Instances accept traffic from this SG and nothing else.
+resource "aws_security_group" "alb" {
+  name_prefix = "${local.name_prefix}-alb-"
+  description = "Public ALB: HTTP from the internet"
+  vpc_id      = aws_vpc.main.id
+
+  tags = { Name = "${local.name_prefix}-alb-sg" }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "alb" {
+  for_each = local.web_ingress_rules
+
+  security_group_id = aws_security_group.alb.id
+  description       = each.value.description
+  ip_protocol       = "tcp"
+  from_port         = each.value.port
+  to_port           = each.value.port
+  cidr_ipv4         = each.value.cidr
+
+  tags = { Name = "${local.name_prefix}-alb-in-${each.key}" }
+}
+
+# ALB -> instances (forwarding + health checks), referenced by SG, not by IP.
+resource "aws_vpc_security_group_egress_rule" "alb_to_web" {
+  security_group_id            = aws_security_group.alb.id
+  description                  = "HTTP to the web instances"
+  ip_protocol                  = "tcp"
+  from_port                    = 80
+  to_port                      = 80
+  referenced_security_group_id = aws_security_group.web.id
+}
+
 # ---------------------------------- Web tier ----------------------------------
 resource "aws_security_group" "web" {
   # name_prefix (not name): create_before_destroy needs the new SG to coexist with the old one,
@@ -18,17 +55,15 @@ resource "aws_security_group" "web" {
   }
 }
 
-resource "aws_vpc_security_group_ingress_rule" "web" {
-  for_each = local.web_ingress_rules
-
-  security_group_id = aws_security_group.web.id
-  description       = each.value.description
-  ip_protocol       = "tcp"
-  from_port         = each.value.port
-  to_port           = each.value.port
-  cidr_ipv4         = each.value.cidr
-
-  tags = { Name = "${local.name_prefix}-web-in-${each.key}" }
+# Phase 8.3: instances are no longer reachable from the internet directly — only via the ALB.
+# (The description above is kept as-is: changing an SG description forces replacement.)
+resource "aws_vpc_security_group_ingress_rule" "web_from_alb" {
+  security_group_id            = aws_security_group.web.id
+  description                  = "HTTP from the load balancer only"
+  ip_protocol                  = "tcp"
+  from_port                    = 80
+  to_port                      = 80
+  referenced_security_group_id = aws_security_group.alb.id
 }
 
 # Outbound: the instance needs HTTPS to reach ECR, SSM, Secrets Manager, OS package repos.

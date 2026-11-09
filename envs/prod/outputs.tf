@@ -17,6 +17,10 @@ output "private_subnet_ids" {
   value       = module.network.private_subnet_ids
 }
 
+output "alb_security_group_id" {
+  value = module.network.alb_security_group_id
+}
+
 output "web_security_group_id" {
   value = module.network.web_security_group_id
 }
@@ -31,33 +35,17 @@ output "subnet_cidrs" {
 }
 
 output "web_url" {
-  description = "Open this in a browser."
-  value       = "http://${module.web.public_ip}"
+  description = "Open this in a browser (the load balancer)."
+  value       = "http://${module.web.alb_dns_name}"
 }
 
-output "web_public_eip" {
-  value = module.web.public_ip
+output "web_asg_name" {
+  value = module.web.asg_name
 }
 
-output "web_private_ip" {
-  value = module.web.private_ip
-}
-
-output "web_instance_id" {
-  value = module.web.instance_id
-}
-
-output "web_availability_zone" {
-  value = module.web.availability_zone
-}
-
-output "ebs_volume_id" {
-  value = module.web.ebs_volume_id
-}
-
-output "ssm_shell_command" {
-  description = "Open a shell on the instance without SSH (needs the Session Manager plugin)."
-  value       = "aws ssm start-session --target ${module.web.instance_id}"
+output "ssm_shell_hint" {
+  description = "Instances come and go; find one, then open a shell without SSH."
+  value       = "aws ec2 describe-instances --filters Name=tag:aws:autoscaling:groupName,Values=${module.web.asg_name} Name=instance-state-name,Values=running --query 'Reservations[].Instances[].InstanceId' --output text  # then: aws ssm start-session --target <id>"
 }
 
 output "image_tag_parameter" {

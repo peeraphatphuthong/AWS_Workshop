@@ -63,8 +63,8 @@ data "aws_iam_policy_document" "healthcheck" {
 
   # Describe* calls do not support resource-level permissions.
   statement {
-    sid       = "ReadInstanceState"
-    actions   = ["ec2:DescribeInstanceStatus"]
+    sid       = "ReadAsgCapacity"
+    actions   = ["autoscaling:DescribeAutoScalingGroups"]
     resources = ["*"]
   }
 }
@@ -89,9 +89,9 @@ resource "aws_lambda_function" "healthcheck" {
 
   environment {
     variables = {
-      URL         = "http://${var.public_ip}/readyz"
-      INSTANCE_ID = var.instance_id
-      NAMESPACE   = local.metric_namespace
+      URL       = "http://${var.app_host}/readyz"
+      ASG_NAME  = var.asg_name
+      NAMESPACE = local.metric_namespace
     }
   }
 

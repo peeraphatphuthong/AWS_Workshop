@@ -4,7 +4,7 @@ A hands-on, production-style project for learning **AWS** and **Terraform** end 
 infrastructure as code, GitOps-style CI/CD with GitHub Actions, a containerized web app,
 a managed database, monitoring, and cost control (FinOps).
 
-> Status: **Phase 8 — Level up (in progress)**: Terraform modules, per-environment roots (`envs/dev` applied, `envs/prod` plan-only) on top of Phase 7 observability & FinOps (`terraform -chdir=envs/dev output web_url`) (see [docs/ROADMAP.md](docs/ROADMAP.md))
+> Status: **Phase 8 — Level up (in progress)**: Terraform modules, per-environment roots (`envs/dev` applied, `envs/prod` plan-only), ALB + Auto Scaling Group on top of Phase 7 observability & FinOps (`terraform -chdir=envs/dev output web_url`) (see [docs/ROADMAP.md](docs/ROADMAP.md))
 
 ## Target architecture
 
@@ -17,11 +17,11 @@ AWS (ap-southeast-2, Sydney)
  ├─ S3              Terraform remote state (+ native lockfile)
  ├─ ECR             Docker images of the app
  └─ VPC (2 AZs)
-     ├─ Public subnet   EC2 t3.micro + Elastic IP + EBS gp3
-     │                  Docker: NGINX reverse proxy → Node.js app
+     ├─ Public subnets  ALB (HTTP :80) → Auto Scaling Group of t3.micro (1-2, both AZs)
+     │                  Docker: NGINX reverse proxy → Node.js app (stateless instances)
      │                  Access via SSM Session Manager (no SSH port 22)
      └─ Private subnets RDS MySQL 8.4 db.t4g.micro (TLS only, creds in Secrets Manager)
- CloudWatch Alarms → SNS email · AWS Budgets · EventBridge Scheduler (stop off-hours)
+ CloudWatch Alarms → SNS email · AWS Budgets · EventBridge Scheduler (scale to 0 / stop RDS off-hours)
 ```
 
 ## Repository layout (grows phase by phase)
