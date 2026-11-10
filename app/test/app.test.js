@@ -12,7 +12,7 @@ let dataDir;
 
 before(async () => {
   dataDir = await mkdtemp(path.join(tmpdir(), 'retail-health-'));
-  const config = loadConfig({ IMDS_DISABLED: 'true', DATA_DIR: dataDir, GIT_SHA: 'test123' });
+  const config = loadConfig({ IMDS_DISABLED: 'true', DATA_DIR: dataDir, GIT_SHA: 'test123', STATUS_CACHE_MS: '0' });
   server = createApp(config).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -67,4 +67,25 @@ test('unknown routes return 404 JSON and no X-Powered-By header', async () => {
   const res = await fetch(`${baseUrl}/nope`);
   assert.equal(res.status, 404);
   assert.equal(res.headers.get('x-powered-by'), null);
+});
+
+test('a burst of dashboard requests shares one status refresh (incident 2026-11-10)', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'retail-health-burst-'));
+  const config = loadConfig({ IMDS_DISABLED: 'true', DATA_DIR: dir, STATUS_CACHE_MS: '60000' });
+  const burstServer = createApp(config).listen(0);
+  await new Promise((resolve) => burstServer.once('listening', resolve));
+  const url = `http://127.0.0.1:${burstServer.address().port}`;
+  try {
+    const bodies = await Promise.all(
+      Array.from({ length: 50 }, () => fetch(`${url}/api/status`).then((r) => r.json()))
+    );
+    // 50 concurrent requests -> the health log was written once, everyone got the same result.
+    assert.ok(bodies.every((b) => b.ebs.totalWrites === 1));
+    const html = await (await fetch(`${url}/`)).text();
+    assert.match(html, /Retail Store Health/);
+    assert.equal((await (await fetch(`${url}/api/status`)).json()).ebs.totalWrites, 1);
+  } finally {
+    await new Promise((resolve) => burstServer.close(resolve));
+    await rm(dir, { recursive: true, force: true });
+  }
 });

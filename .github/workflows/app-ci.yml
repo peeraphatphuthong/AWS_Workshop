@@ -78,6 +78,26 @@ jobs:
           docker exec smoke head -c 27 /app/certs/rds-global-bundle.pem | grep -q 'BEGIN CERTIFICATE'
           docker rm -f smoke
 
+      # The real nginx.conf in front of the real image: config is valid, proxying works and the per-IP
+      # rate limit returns 429 for a burst (regression test for the 2026-11-10 scanner incident).
+      - name: NGINX config + rate limit test
+        run: |
+          NGINX_IMAGE=$(grep -oE 'image: nginx:[^ ]+' app/docker-compose.yml | cut -d' ' -f2)
+          docker network create rh
+          docker run -d --name app --network rh -e IMDS_DISABLED=true retail-health:${{ github.sha }}
+          docker run -d --name proxy --network rh -p 8081:80 \
+            -v "$PWD/app/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" "$NGINX_IMAGE"
+          docker exec proxy nginx -t
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8081/healthz && break; sleep 1; done
+          sleep 1 # let the limiter's bucket refill after the readiness probes
+          codes=$(for i in $(seq 1 100); do curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8081/healthz & done; wait)
+          n200=$(grep -c '^200$' <<< "$codes" || true)
+          n429=$(grep -c '^429$' <<< "$codes" || true)
+          echo "100 concurrent requests from one IP: $n200 x 200, $n429 x 429"
+          docker logs proxy 2>&1 | tail -n 3
+          [ "$n200" -ge 40 ] && [ "$n429" -ge 1 ]
+          docker rm -f proxy app && docker network rm rh
+
       - name: Trivy — report all HIGH/CRITICAL (including unfixed)
         run: |
           docker run --rm \

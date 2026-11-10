@@ -28,3 +28,6 @@ Each phase ends with a `docs/phase-N-*.md` note (concepts, commands, interview Q
 | Cloud Monitoring / Logging | CloudWatch Metrics / Logs |
 | Secret Manager | Secrets Manager / SSM Parameter Store |
 | GCS (Terraform backend) | S3 |
+
+## Incidents (postmortems)
+- [2026-11-10 — scanner burst caused 40 s of 504s on the EC2 tier](incidents/2026-11-10-scanner-burst-504.md): per-IP rate limit, real client IP in logs, status cache
