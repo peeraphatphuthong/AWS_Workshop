@@ -36,7 +36,7 @@ AWS (ap-southeast-2, Sydney)
 ├── modules/          # Phase 8: network, database, web, observability, fargate
 ├── app/              # Phase 3: Node.js app, Dockerfile, NGINX config
 ├── scripts/          # FinOps / ops helper scripts
-├── docs/             # Roadmap + per-phase notes and interview Q&A
+├── docs/             # Roadmap + per-phase notes and interview Q&A; docs/incidents/ = postmortems
 └── .github/workflows # CI/CD pipelines
 ```
 

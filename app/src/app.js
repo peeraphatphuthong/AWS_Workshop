@@ -3,6 +3,7 @@ import { checkEc2 } from './checks/ec2.js';
 import { checkEbs } from './checks/ebs.js';
 import { checkDb, isDbConfigured } from './checks/db.js';
 import { renderDashboard } from './view.js';
+import { cached } from './cache.js';
 
 export function createApp(config) {
   const app = express();
@@ -10,8 +11,16 @@ export function createApp(config) {
   // Behind NGINX: trust the X-Forwarded-* headers it sets.
   app.set('trust proxy', 'loopback, uniquelocal');
 
-  async function collectStatus() {
-    const ec2 = await checkEc2(config);
+  // Instance metadata never changes while the process runs: fetch it once (successful results only).
+  const ec2Info = cached(async () => {
+    const result = await checkEc2(config);
+    if (result.status !== 'ok' && result.status !== 'skipped') throw Object.assign(new Error('imds'), { result });
+    return result;
+  }, Infinity);
+  const getEc2 = () => ec2Info().catch((err) => err.result ?? { status: 'unavailable', message: err.message });
+
+  async function freshStatus() {
+    const ec2 = await getEc2();
     const [ebs, db] = await Promise.all([checkEbs(config), checkDb(config, ec2.instanceId ?? 'local')]);
     return {
       app: {
@@ -25,6 +34,9 @@ export function createApp(config) {
       db,
     };
   }
+
+  // GET / and /api/status write a DB row and a log line per call: share one result per window.
+  const collectStatus = cached(freshStatus, config.statusCacheMs);
 
   // Liveness: is the process alive? Never depends on downstream systems,
   // otherwise a DB blip would make the orchestrator restart healthy containers.
