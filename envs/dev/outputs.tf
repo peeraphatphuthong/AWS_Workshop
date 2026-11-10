@@ -96,3 +96,8 @@ output "fargate_url" {
 output "fargate_service" {
   value = "${module.fargate.cluster_name}/${module.fargate.service_name}"
 }
+
+output "fargate_events_log_group" {
+  description = "Why Fargate tasks stopped (stopCode, stoppedReason), deployments, service actions."
+  value       = module.fargate.events_log_group_name
+}
