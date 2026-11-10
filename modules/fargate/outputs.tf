@@ -22,3 +22,8 @@ output "target_group_arn_suffix" {
 output "log_group_name" {
   value = aws_cloudwatch_log_group.app.name
 }
+
+output "events_log_group_name" {
+  description = "ECS task-stopped / deployment / service-action events (why a task stopped)."
+  value       = aws_cloudwatch_log_group.ecs_events.name
+}

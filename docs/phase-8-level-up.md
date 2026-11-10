@@ -278,6 +278,26 @@ on EC2 (or ECS on EC2 with Savings Plans).
 - Drift check after the pipeline deploy: **No changes** — `track_latest` + the shared SSM tag work as intended.
 - Schedules `stop-fargate` (22:00, desired 0) and `start-fargate` (08:00, desired 1) target the service.
 
+### Why did a task stop? (follow-up, 2026-11-10)
+On its first full day the Fargate task was replaced twice without a deploy (08:42 and 12:46 Bangkok). The service
+events showed only "deregistered target / started 1 tasks", and ECS keeps stopped tasks for about an hour, so the
+reason (`stopCode` / `stoppedReason`, e.g. `SpotInterruption`) was already gone — probably Spot, but unproven.
+
+Now two EventBridge rules (free) send ECS events to `/aws/events/aws-workshop-dev-ecs` (7-day retention):
+- **task stopped** in this cluster (any `stopCode`),
+- **deployment state changes** (incl. circuit-breaker rollbacks) and **service actions** (e.g. no Spot capacity).
+
+A Logs target has no IAM role: the log group's **resource policy** lets `events.amazonaws.com` write, limited to
+these two rules (`aws:SourceArn`). Query:
+
+```
+fields @timestamp, detail.stopCode, detail.stoppedReason, detail.taskArn
+| filter `detail-type` = "ECS Task State Change"
+| sort @timestamp desc
+```
+Every night at 22:00 the schedule produces one `ServiceSchedulerInitiated` stop, which is a handy check that the
+pipeline works.
+
 ### Interview Q&A (8.4)
 - **Q: ECS task execution role vs task role?**
   A: The execution role is used by the ECS agent to start the task (pull the image, write logs, fetch secrets).
@@ -294,6 +314,10 @@ on EC2 (or ECS on EC2 with Savings Plans).
 - **Q: When would you choose EC2 over Fargate?**
   A: GPUs or special instance types, daemons/host access, very large steady workloads where reserved EC2 is
   cheaper, or needing more than Fargate's limits. Otherwise Fargate removes host management.
+- **Q: A task disappeared hours ago. How do you find out why?**
+  A: `describe-tasks` only keeps stopped tasks for about an hour, so capture "ECS Task State Change" events
+  (EventBridge → CloudWatch Logs or a queue) and read `stopCode` / `stoppedReason`; check AWS Health for Fargate
+  task retirement notices.
 - **Q: Fargate Spot — what happens on interruption?**
   A: The task gets a SIGTERM with a 2-minute warning and is stopped; the service starts a replacement (on Spot if
   capacity exists). Fine for dev and stateless, multi-task services; mix in a `FARGATE` base for production.
